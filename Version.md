@@ -1,9 +1,12 @@
 ---
 enabled: true
-current: 0.1.5
+current: 0.2.0
 ---
 
 # Version History
+
+## 0.2.0 — 2026-04-07
+MCP server: 15 tools via stdio transport with role-based access (reader/writer/admin, default reader). Standard response contract { ok, data|errors }. Scan path safety (project-root only). Shutdown hooks. README trimmed — moved architecture detail to FRAMEWORK.md. Archived pre-build design docs to Project-Archive/. 4 production dependencies. 211 tests passing.
 
 ## 0.1.5 — 2026-04-07
 FRAMEWORK.md: data doctrine, three-tier command model (primitive / deterministic composite / agent workflow), engine design principles. New scan command for LLM-native onboarding (file-level structural analysis + corpus-level pattern summary). Removed inspect from engine (documented as agent composition pattern). Marked get full as provisional composite. Added search --doc flag. MAAD.md now regenerated on every reindex. Old FRAMEWORK.md and README-MVP.md archived. 211 tests passing.

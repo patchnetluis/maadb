@@ -1,6 +1,6 @@
 {
   "name": "maad",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "description": "Markdown As A Database — treats markdown as the canonical data store, builds a queryable index, and gives LLMs deterministic read/write access.",
   "type": "module",
   "main": "dist/engine.js",
@@ -32,6 +32,7 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^12.8.0",
     "gray-matter": "^4.0.3",
     "simple-git": "^3.35.2"

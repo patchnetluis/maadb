@@ -11,6 +11,7 @@ import { cmdGet, cmdQuery, cmdSearch, cmdRelated, cmdSchema } from './commands/r
 import { cmdCreate, cmdUpdate } from './commands/write.js';
 import { cmdInit, cmdValidate, cmdReindex, cmdParse } from './commands/maintain.js';
 import { cmdHistory, cmdAudit } from './commands/audit.js';
+import { startServer } from '../mcp/server.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -55,9 +56,9 @@ async function main(): Promise<void> {
     // Audit
     case 'history':   await cmdHistory(ctx); break;
     case 'audit':     await cmdAudit(ctx); break;
-    // Other
+    // MCP
     case 'serve':
-      console.log('MCP server is on the roadmap. Use the engine library or CLI for now.');
+      await cmdServe();
       break;
     case 'help':
     case '--help':
@@ -70,6 +71,21 @@ async function main(): Promise<void> {
       printHelp();
       process.exit(1);
   }
+}
+
+async function cmdServe(): Promise<void> {
+  // Parse --role from args
+  let role: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--role' && args[i + 1]) {
+      role = args[i + 1];
+    }
+  }
+
+  await startServer({
+    projectRoot: path.resolve(projectRoot),
+    role,
+  });
 }
 
 function printHelp(): void {
@@ -95,9 +111,11 @@ Commands:
   parse <file.md>                   Parse a file and print the result
   history <doc_id>                  Show git history for a document
   audit [--since date]              Show project-wide activity
+  serve [--role reader|writer|admin] Start MCP server (stdio transport)
 
 Options:
   --project <dir>                   Set project root (default: cwd)
+  --role <role>                     MCP server role (default: reader)
   --force                           Force full reindex (skip hash check)
   --help                            Show this help
 `);
