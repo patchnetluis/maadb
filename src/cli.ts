@@ -282,7 +282,6 @@ async function cmdQuery(): Promise<void> {
   }
 
   const engine = await initEngine();
-  await engine.indexAll();
 
   const filters: Record<string, { op: 'eq'; value: string }> = {};
   for (let i = 2; i < args.length; i++) {
@@ -313,7 +312,6 @@ async function cmdQuery(): Promise<void> {
 
 async function cmdDescribe(): Promise<void> {
   const engine = await initEngine();
-  await engine.indexAll();
 
   const desc = engine.describe();
   console.log(JSON.stringify(desc, null, 2));
@@ -332,7 +330,6 @@ async function cmdGet(): Promise<void> {
   }
 
   const engine = await initEngine();
-  await engine.indexAll();
 
   const result = await engine.getDocument(docId(id), depth, block);
   if (!result.ok) {
@@ -354,7 +351,6 @@ async function cmdSearch(): Promise<void> {
   }
 
   const engine = await initEngine();
-  await engine.indexAll();
 
   const query: Record<string, unknown> = { primitive };
   for (let i = 2; i < args.length; i++) {
@@ -385,7 +381,6 @@ async function cmdRelated(): Promise<void> {
   }
 
   const engine = await initEngine();
-  await engine.indexAll();
 
   const result = engine.listRelated(docId(id), direction);
   if (!result.ok) {
@@ -407,7 +402,6 @@ async function cmdHistory(): Promise<void> {
   }
 
   const engine = await initEngine();
-  await engine.indexAll();
 
   const result = await engine.history(docId(id));
   if (!result.ok) {
@@ -426,7 +420,6 @@ async function cmdAudit(): Promise<void> {
   const since = sinceIdx >= 0 ? args[sinceIdx + 1] : undefined;
 
   const engine = await initEngine();
-  await engine.indexAll();
 
   const result = await engine.audit(since ? { since } : {});
   if (!result.ok) {
@@ -555,7 +548,6 @@ async function cmdInspect(): Promise<void> {
   }
 
   const engine = await initEngine();
-  await engine.indexAll();
 
   const result = await engine.inspect(docId(id));
   if (!result.ok) {
