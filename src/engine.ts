@@ -321,9 +321,13 @@ export class MaadEngine {
     const fieldIndex: Array<{ name: string; value: string; numericValue: number | null; type: string }> = [];
     for (const [name, field] of Object.entries(validatedFields)) {
       if (field.indexed) {
+        // gray-matter parses date strings as JS Date objects — convert back to ISO
+        const fieldValue = field.value instanceof Date
+          ? field.value.toISOString().slice(0, 10)
+          : String(field.value);
         fieldIndex.push({
           name,
-          value: String(field.value),
+          value: fieldValue,
           numericValue: computeNumericValue(field.value, field.fieldType),
           type: field.fieldType,
         });

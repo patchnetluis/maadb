@@ -6,10 +6,15 @@
 // ============================================================================
 
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { MaadEngine } from './engine.js';
 import { GitLayer } from './git/index.js';
 import { docId, docType } from './types.js';
+import { generateMaadMd, generateStubMaadMd } from './maad-md.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Parse --project flag out of args before command dispatch
 const rawArgs = process.argv.slice(2);
@@ -62,6 +67,15 @@ async function main(): Promise<void> {
     case 'audit':
       await cmdAudit();
       break;
+    case 'create':
+      await cmdCreate();
+      break;
+    case 'update':
+      await cmdUpdate();
+      break;
+    case 'inspect':
+      await cmdInspect();
+      break;
     case 'serve':
       console.log('MCP server is on the roadmap. Use the engine library or CLI for now.');
       break;
@@ -108,6 +122,14 @@ async function cmdInit(): Promise<void> {
   if (!existsSync(gitignorePath)) {
     writeFileSync(gitignorePath, '_backend/\n', 'utf-8');
     console.log('  Created .gitignore');
+  }
+
+  // Generate MAAD.md stub
+  const maadMdPath = path.join(root, 'MAAD.md');
+  if (!existsSync(maadMdPath)) {
+    const enginePath = path.resolve(__dirname, 'cli.js');
+    writeFileSync(maadMdPath, generateStubMaadMd(enginePath, root), 'utf-8');
+    console.log('  Created MAAD.md');
   }
 
   // Init git
@@ -210,6 +232,28 @@ async function cmdReindex(): Promise<void> {
   if (r.errors.length > 0) {
     console.log(`Errors: ${r.errors.length}`);
     for (const e of r.errors) console.log(`  ${e.code}: ${e.message}`);
+  }
+
+  // Regenerate MAAD.md with current type information
+  try {
+    const { loadSchemas } = await import('./schema/index.js');
+    const registry = engine.getRegistry();
+    const schemaResult = await loadSchemas(engine.getProjectRoot(), registry);
+    if (schemaResult.ok) {
+      const stats = engine.getBackend().getStats();
+      const enginePath = path.resolve(__dirname, 'cli.js');
+      const maadMd = generateMaadMd({
+        projectRoot: engine.getProjectRoot(),
+        enginePath,
+        registry,
+        schemaStore: schemaResult.value,
+        stats,
+      });
+      writeFileSync(path.join(engine.getProjectRoot(), 'MAAD.md'), maadMd, 'utf-8');
+      console.log('Updated MAAD.md');
+    }
+  } catch (e) {
+    console.warn(`MAAD.md generation failed: ${e instanceof Error ? e.message : String(e)}`);
   }
 
   engine.close();
@@ -381,6 +425,135 @@ async function cmdAudit(): Promise<void> {
   engine.close();
 }
 
+async function cmdCreate(): Promise<void> {
+  const typeArg = args[1];
+  if (!typeArg) {
+    console.error('Usage: maad create <doc_type> --field key=value [--body "text"] [--id custom-id]');
+    process.exit(1);
+  }
+
+  const engine = await initEngine();
+  await engine.indexAll();
+
+  // Parse --field flags
+  const fields: Record<string, unknown> = {};
+  let body: string | undefined;
+  let customId: string | undefined;
+
+  for (let i = 2; i < args.length; i++) {
+    const arg = args[i]!;
+    const next = args[i + 1];
+    if (arg === '--field' && next) {
+      const eqIdx = next.indexOf('=');
+      if (eqIdx > 0) {
+        const key = next.slice(0, eqIdx);
+        let val: unknown = next.slice(eqIdx + 1);
+        // Parse arrays: "tags=[a,b,c]"
+        if (typeof val === 'string' && val.startsWith('[') && val.endsWith(']')) {
+          val = val.slice(1, -1).split(',').map(s => s.trim());
+        }
+        fields[key] = val;
+      }
+      i++;
+    } else if (arg === '--body' && next) {
+      body = next;
+      i++;
+    } else if (arg === '--id' && next) {
+      customId = next;
+      i++;
+    }
+  }
+
+  const result = await engine.createDocument(docType(typeArg), fields, body, customId);
+  if (!result.ok) {
+    console.error('Create failed:');
+    for (const e of result.errors) console.error(`  ${e.code}: ${e.message}`);
+    engine.close();
+    process.exit(1);
+  }
+
+  console.log(JSON.stringify(result.value, null, 2));
+  engine.close();
+}
+
+async function cmdUpdate(): Promise<void> {
+  const id = args[1];
+  if (!id) {
+    console.error('Usage: maad update <doc_id> --field key=value [--body "text"] [--append "text"]');
+    process.exit(1);
+  }
+
+  const engine = await initEngine();
+  await engine.indexAll();
+
+  const fields: Record<string, unknown> = {};
+  let body: string | undefined;
+  let appendBody: string | undefined;
+
+  for (let i = 2; i < args.length; i++) {
+    const arg = args[i]!;
+    const next = args[i + 1];
+    if (arg === '--field' && next) {
+      const eqIdx = next.indexOf('=');
+      if (eqIdx > 0) {
+        const key = next.slice(0, eqIdx);
+        let val: unknown = next.slice(eqIdx + 1);
+        if (typeof val === 'string' && val.startsWith('[') && val.endsWith(']')) {
+          val = val.slice(1, -1).split(',').map(s => s.trim());
+        }
+        fields[key] = val;
+      }
+      i++;
+    } else if (arg === '--body' && next) {
+      body = next;
+      i++;
+    } else if (arg === '--append' && next) {
+      appendBody = next;
+      i++;
+    }
+  }
+
+  const hasFields = Object.keys(fields).length > 0;
+  const result = await engine.updateDocument(
+    docId(id),
+    hasFields ? fields : undefined,
+    body,
+    appendBody,
+  );
+
+  if (!result.ok) {
+    console.error('Update failed:');
+    for (const e of result.errors) console.error(`  ${e.code}: ${e.message}`);
+    engine.close();
+    process.exit(1);
+  }
+
+  console.log(JSON.stringify(result.value, null, 2));
+  engine.close();
+}
+
+async function cmdInspect(): Promise<void> {
+  const id = args[1];
+  if (!id) {
+    console.error('Usage: maad inspect <doc_id>');
+    process.exit(1);
+  }
+
+  const engine = await initEngine();
+  await engine.indexAll();
+
+  const result = await engine.inspect(docId(id));
+  if (!result.ok) {
+    console.error('Inspect failed:');
+    for (const e of result.errors) console.error(`  ${e.code}: ${e.message}`);
+    engine.close();
+    process.exit(1);
+  }
+
+  console.log(JSON.stringify(result.value, null, 2));
+  engine.close();
+}
+
 // --- Helpers ---------------------------------------------------------------
 
 async function initEngine(): Promise<MaadEngine> {
@@ -402,14 +575,17 @@ Usage: maad <command> [options]
 
 Commands:
   init [dir]                        Initialize a new MAAD project
-  parse <file.md>                   Parse a file and print the result
-  validate [doc_id]                 Validate one or all documents
-  reindex [--force]                 Rebuild the index from markdown
   describe                          Show project overview
-  query <type> [--filter k=v]       Find documents by type and filters
   get <doc_id> [depth] [block]      Read a document (hot/warm/cold)
+  query <type> [--filter k=v]       Find documents by type and filters
   search <primitive> [--subtype s]  Search extracted objects
   related <doc_id> [direction]      Show related documents
+  inspect <doc_id>                  Show full engine internals for a document
+  create <type> --field k=v [...]   Create a new document
+  update <doc_id> --field k=v [...] Update a document's fields or body
+  validate [doc_id]                 Validate one or all documents
+  reindex [--force]                 Rebuild the index from markdown
+  parse <file.md>                   Parse a file and print the result
   history <doc_id>                  Show git history for a document
   audit [--since date]              Show project-wide activity
 

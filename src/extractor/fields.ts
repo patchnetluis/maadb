@@ -29,7 +29,10 @@ export function extractFields(
     if (field.value === undefined || field.value === null) continue;
 
     const primitive = FIELD_TYPE_TO_PRIMITIVE[field.fieldType] ?? 'entity';
-    const valueStr = String(field.value);
+    // gray-matter parses date strings as JS Date objects — convert back to ISO
+    const valueStr = field.value instanceof Date
+      ? field.value.toISOString().slice(0, 10)
+      : String(field.value);
     const normalizedValue = normalize(primitive, valueStr);
 
     objects.push({

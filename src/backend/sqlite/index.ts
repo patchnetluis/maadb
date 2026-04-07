@@ -39,6 +39,7 @@ export class SqliteBackend implements MaadBackend {
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');
     this.db.pragma('synchronous = NORMAL');
+    this.db.pragma('busy_timeout = 5000');
     this.db.exec(SCHEMA_SQL);
   }
 

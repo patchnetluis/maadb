@@ -1,6 +1,8 @@
 # MAAD Roadmap
 
-## Completed (v0.1.0)
+## Completed
+
+### v0.1.0 — 2026-04-06
 
 - [x] Core type system (branded IDs, 11 primitives, extensible subtype map)
 - [x] Parser (frontmatter, blocks, `{{field}}`, `[[type:value|label]]`, verbatim zone safety)
@@ -12,9 +14,39 @@
 - [x] Writer (deterministic YAML serialization, template body generation)
 - [x] Git integration (auto-commit, structured messages, history, audit, diff, snapshot)
 - [x] CLI (11 commands: init, parse, validate, reindex, describe, query, get, search, related, history, audit)
-- [x] Example project: Simple CRM fixture (client, contact, case, case_note)
+- [x] Test fixture: Simple CRM (client, contact, case, case_note)
+
+### v0.1.1 — 2026-04-07
+
+- [x] Git boundary detection (checks .git at project root, not parent)
+- [x] Reindex stale row cleanup (removes orphaned records for deleted files)
+- [x] Numeric query semantics (REAL column for correct range comparisons)
+- [x] Write-path recovery warnings (logs hint if indexing fails after file write)
+- [x] YAML profile enforcement (rejects deep nesting >2, multi-document YAML)
+- [x] List-of-ref relationship support (validator + extractor, one edge per array element)
+- [x] Round-trip authoring stability (proven across create -> update -> reindex cycles)
+- [x] Test isolation hardening, MCP stub cleanup (3 production deps)
+
+---
 
 ## Near-Term
+
+### maad-demo (next)
+
+Product showcase and template engine demo. Separate repo: `patchnetluis/maad-demo`.
+
+**Demo 1: Legal CRM Application**
+- [ ] Seed data: ~10 clients, ~15 contacts, ~12 cases, ~25 case notes
+- [ ] Rich inline annotations across all 11 primitives
+- [ ] Cross-document relationship graph with meaningful traversal paths
+- [ ] Custom extraction subtypes (attorney, judge, witness, filing_date, settlement_amount)
+- [ ] Scripted demos: overview, query, relationships, tiered reads, CRUD, audit
+
+**Demo 3: Template Engine (inside maad-demo)**
+- [ ] Document templates: demand letter, case summary, client briefing memo
+- [ ] Template definitions in YAML (fields, sections, format rules)
+- [ ] Scripted demos: draft letter from case data, generate case summary from case + notes
+- [ ] Consistency demo: run same generation 5x, compare output stability
 
 ### MCP Server (v0.2.0)
 
@@ -32,11 +64,47 @@ The primary LLM interface. Thin wrapper over the engine — 15 tools across 5 ca
 
 Reference: [MAAD-TOOLS.md](MAAD-TOOLS.md) has the full tool spec with JSON schemas.
 
-### Additional Example Projects
+### maad-benchmark (after MCP server)
 
-- [ ] Meeting Notes example (semi-structured: date, participants, list items)
-- [ ] Freeform Narrative example (investigation report with inline annotations)
-- [ ] Run all three examples through the full pipeline and document results
+A/B evaluation proving MAAD's value as an LLM interface layer. Separate repo: `patchnetluis/maad-benchmark`.
+
+**Thesis:** "Compared with raw document retrieval, MAAD reduces LLM token usage, improves grounded cross-document retrieval, and produces more repeatable structured outputs on document-centric tasks."
+
+**Corpus:**
+- [ ] 500-1000 synthetic legal case records (generated via MAAD engine)
+- [ ] Controlled entity density, cross-doc relationships, date ranges
+- [ ] Gold answers human-curated (we know answers because we wrote the data)
+
+**Two conditions (same model, same corpus, same questions):**
+- [ ] Condition A: Raw document interface (chunk retrieval, no MAAD index)
+- [ ] Condition B: MAAD interface (parsed records, object index, relationship graph, tiered reads)
+
+**Four task classes:**
+- [ ] Fact lookup — filing date, amount, contact, status (test token efficiency + exact retrieval)
+- [ ] Filtered retrieval — find all open matters for org X, records mentioning person Y in March (test indexed access vs raw search)
+- [ ] Cross-document traversal — related records, entity-event connections, timeline assembly (test graph value over isolated reads)
+- [ ] Deterministic authoring — create compliant note, update record, insert structured metadata (test reproducibility)
+
+**Metrics per task class:**
+- [ ] Exact Match (EM) / Precision / Recall / F1
+- [ ] Prompt tokens / total tokens / token reduction
+- [ ] Latency (avg, p95)
+- [ ] Hallucination rate / citation grounding rate
+- [ ] Consistency score across 5-10 repeated runs
+- [ ] Schema-valid output rate (authoring tasks)
+
+**Infrastructure:**
+- [ ] Task runner (executes tasks against both conditions)
+- [ ] Scorer (scores answers against gold)
+- [ ] Retrieval logger (docs opened, tiers used, tokens sent, latency)
+- [ ] Reporter (comparison tables by task class + overall summary)
+
+**Success criteria:**
+- Significantly lower token consumption
+- Equal or better accuracy
+- Better performance on linked-record tasks
+- Lower hallucination / higher grounding
+- Much better deterministic writing consistency
 
 ### Testing & Polish
 
@@ -44,6 +112,8 @@ Reference: [MAAD-TOOLS.md](MAAD-TOOLS.md) has the full tool spec with JSON schem
 - [ ] Error message improvements (more actionable guidance)
 - [ ] `maad init` generates a starter schema for common patterns
 - [ ] Documentation: getting started guide
+
+---
 
 ## Mid-Term
 
@@ -75,6 +145,8 @@ The architecture supports bidirectional flow. Converter scripts bring existing d
 - [ ] Section-level body updates (update a specific block without rewriting the whole file)
 - [ ] Partial reindex after frontmatter-only updates (skip full parse)
 - [ ] Markdown formatting options (line wrapping, list style)
+
+---
 
 ## Long-Term
 
@@ -116,4 +188,14 @@ The architecture supports bidirectional flow. Converter scripts bring existing d
 
 ---
 
-*Priorities may shift based on real-world usage. The MCP server is the immediate next step — it's what makes MAAD a tool for LLMs, not just a tool for developers.*
+## Repos
+
+| Repo | Purpose | Status |
+|------|---------|--------|
+| `patchnetluis/maad` | Engine framework (this repo) | v0.1.1 — 192 tests, 3 deps |
+| `patchnetluis/maad-demo` | Product showcase + template engine | Next up |
+| `patchnetluis/maad-benchmark` | A/B evaluation proving the thesis | After MCP server |
+
+---
+
+*Build order: maad-demo first (immediate showcase), MCP server second (LLM interface), maad-benchmark third (prove the thesis with data).*
