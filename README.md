@@ -46,30 +46,78 @@ Initial issue raised on [[date:2026-03-28|March 28, 2026]].
 
 Frontmatter = structured fields. Headings = addressable sections. `[[type:value|label]]` = inline annotations extracted and indexed by the engine. 11 extraction primitives: `entity`, `date`, `duration`, `amount`, `measure`, `quantity`, `percentage`, `location`, `identifier`, `contact`, `media`.
 
-## Quick start
+## Setup
 
 ```bash
 npm install && npm run build
-
-# Initialize a project
-maad init my-project
-
-# Add types, schemas, and markdown records, then:
-maad --project my-project reindex --force
-
-# Orient yourself
-maad --project my-project summary
 ```
 
-### LLM-native onboarding
-
-Drop raw markdown files and let the LLM bootstrap the project:
+### Create a project
 
 ```bash
-maad scan ./raw-files/        # corpus-level patterns — LLM sees what types want to exist
-# LLM creates registry + schemas + adds frontmatter
-maad --project ./raw-files reindex --force
+maad init my-project
 ```
+
+Creates: `_registry/`, `_schema/`, `_backend/`, `_import/`, `.gitignore`, `MAAD.md`
+
+### Connect an LLM agent
+
+**Claude Desktop / VS Code** — add to MCP settings:
+```json
+{
+  "mcpServers": {
+    "maad": {
+      "command": "node",
+      "args": ["/path/to/maad/dist/cli.js", "--project", "/path/to/project", "serve", "--role", "writer"]
+    }
+  }
+}
+```
+
+**CLI** (testing / debugging):
+```bash
+maad serve --project ./my-project --role writer
+```
+
+### Onboarding data
+
+The agent handles everything after files are staged in `_import/`:
+
+```
+1. Files placed in _import/       (by agent, API, human, or any source)
+2. Agent: scan _import/            → corpus patterns, document families
+3. Agent: creates _registry + _schema from scan output
+4. Agent: adds frontmatter, moves files to type folders
+5. Agent: reindex --force          → index built
+6. Agent: summary                  → oriented, ready to work
+```
+
+`scan` works at two levels:
+- **`scan <file.md>`** — structural read of one document
+- **`scan <dir/>`** — corpus-level patterns (recurring fields, headings, document families)
+
+## Project layout
+
+```
+my-project/
+  _registry/                      # Engine config: type definitions
+    object_types.yaml
+  _schema/                        # Engine config: field schemas per type
+    client.v1.yaml
+  _backend/                       # Derived index (gitignored)
+    maad.db
+  _import/                        # Staging area for raw files (gitignored)
+
+  clients/                        # Records — one folder per registered type
+    cli-acme.md
+  cases/
+    cas-2026-001.md
+
+  MAAD.md                         # Generated: LLM operating instructions
+  SCHEMA.md                       # Generated: data reference
+```
+
+**Convention:** `_` prefix = engine-managed. No prefix = your data. Root `.md` = generated docs.
 
 ## Commands
 
@@ -111,15 +159,9 @@ maad --project ./raw-files reindex --force
 
 Native LLM tool access via Model Context Protocol. 15 tools, role-based access, stdio transport.
 
-```bash
-maad serve --project ./my-project                 # reader (default)
-maad serve --project ./my-project --role writer    # read + write
-maad serve --project ./my-project --role admin     # full access
-```
-
 | Role | Tools | Count |
 |------|-------|-------|
-| reader | scan, summary, describe, get, query, search, related, schema, history, audit | 10 |
+| reader (default) | scan, summary, describe, get, query, search, related, schema, history, audit | 10 |
 | writer | reader + create, update, validate | 13 |
 | admin | writer + delete, reindex | 15 |
 
@@ -130,18 +172,6 @@ All tools return `{ ok: true, data: {...} }` or `{ ok: false, errors: [...] }`.
 1. Read `MAAD.md` — stable operating instructions
 2. Run `summary` — live project snapshot
 3. Use commands as needed
-
-## Project layout
-
-```
-my-project/
-  _registry/object_types.yaml    # Type definitions
-  _schema/*.yaml                 # Field schemas per type
-  <type_folder>/*.md             # Markdown records
-  _backend/maad.db               # Gitignored — rebuildable index
-  MAAD.md                        # Auto-generated LLM instructions
-  SCHEMA.md                      # Auto-generated data reference
-```
 
 ## Stack
 

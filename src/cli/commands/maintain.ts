@@ -17,7 +17,7 @@ export async function cmdInit(ctx: CliContext): Promise<void> {
 
   console.log(`Initializing MAAD project in ${root}`);
 
-  const dirs = ['_registry', '_schema', '_backend'];
+  const dirs = ['_registry', '_schema', '_backend', '_import'];
   for (const d of dirs) {
     const p = path.join(root, d);
     if (!existsSync(p)) {
@@ -34,7 +34,7 @@ export async function cmdInit(ctx: CliContext): Promise<void> {
 
   const gitignorePath = path.join(root, '.gitignore');
   if (!existsSync(gitignorePath)) {
-    writeFileSync(gitignorePath, '_backend/\n', 'utf-8');
+    writeFileSync(gitignorePath, '_backend/\n_import/\n', 'utf-8');
     console.log('  Created .gitignore');
   }
 
