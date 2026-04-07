@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { glob } from 'node:fs/promises';
 
+import matter from 'gray-matter';
 import { ok, err, singleErr, maadError, type Result, type MaadError } from './errors.js';
 import {
   docId as toDocId,
@@ -128,6 +129,58 @@ export interface InspectResult {
   blocks: ParsedBlock[];
   objects: ObjectMatch[];
   relationships: Relationship[];
+}
+
+export interface SummaryResult {
+  types: Array<{
+    type: string;
+    count: number;
+    sampleIds: string[];
+  }>;
+  totalDocuments: number;
+  totalObjects: number;
+  totalRelationships: number;
+  lastIndexedAt: string | null;
+  subtypeInventory: Array<{
+    primitive: string;
+    subtype: string;
+    count: number;
+    topValues: string[];
+  }>;
+  recentActivity: Array<{
+    action: string;
+    docId: string;
+    summary: string;
+    timestamp: string;
+  }>;
+}
+
+export interface GetFullResult {
+  docId: DocId;
+  docType: DocType;
+  frontmatter: Record<string, unknown>;
+  resolvedRefs: Record<string, { docId: string; name: string }>;
+  objects: ObjectMatch[];
+  related: {
+    outgoing: Array<{ docId: string; docType: string; field: string }>;
+    incoming: Array<{ docId: string; docType: string; field: string }>;
+  };
+  latestNote: { docId: string; summary: string; timestamp: string } | null;
+}
+
+export interface SchemaInfoResult {
+  type: string;
+  schemaRef: string;
+  fields: Array<{
+    name: string;
+    type: string;
+    required: boolean;
+    indexed: boolean;
+    values: string[] | null;
+    target: string | null;
+    default: unknown;
+  }>;
+  templateHeadings: Array<{ level: number; text: string }> | null;
 }
 
 export interface ValidationReport {
@@ -313,7 +366,6 @@ export class MaadEngine {
       filePath: toFilePath(relativePath),
       fileHash: parsed.fileHash,
       version: this.getNextVersion(bound.docId),
-      frontmatter: parsed.frontmatter,
       deleted: false,
       indexedAt: new Date().toISOString(),
     };
@@ -436,11 +488,13 @@ export class MaadEngine {
     const doc = this.backend.getDocument(id);
     if (!doc) return singleErr('FILE_NOT_FOUND', `Document "${id as string}" not found`);
 
+    const frontmatter = await this.readFrontmatter(doc);
+
     const result: GetResult = {
       docId: doc.docId,
       docType: doc.docType,
       depth,
-      frontmatter: doc.frontmatter,
+      frontmatter,
     };
 
     if (depth === 'warm' && blockIdOrHeading) {
@@ -450,10 +504,11 @@ export class MaadEngine {
         b.heading.toLowerCase() === blockIdOrHeading.toLowerCase()
       );
       if (match) {
+        const content = await this.readBlockContent(doc, match.startLine, match.endLine, match.heading === '');
         result.block = {
           id: match.id as string | null,
           heading: match.heading,
-          content: match.content,
+          content,
         };
       }
     }
@@ -462,7 +517,6 @@ export class MaadEngine {
       const absPath = path.join(this.projectRoot, doc.filePath as string);
       try {
         const raw = await readFile(absPath, 'utf-8');
-        // Strip frontmatter, return body only
         result.body = extractBody(raw);
       } catch {
         result.body = '';
@@ -470,6 +524,97 @@ export class MaadEngine {
     }
 
     return ok(result);
+  }
+
+  async getDocumentFull(id: DocId): Promise<Result<GetFullResult>> {
+    this.assertInit();
+
+    const doc = this.backend.getDocument(id);
+    if (!doc) return singleErr('FILE_NOT_FOUND', `Document "${id as string}" not found`);
+
+    const frontmatter = await this.readFrontmatter(doc);
+
+    // Resolve ref fields to names
+    const schema = this.schemaStore.getSchemaForType(doc.docType);
+    const resolvedRefs: Record<string, { docId: string; name: string }> = {};
+    if (schema) {
+      for (const [fieldName, fieldDef] of schema.fields) {
+        if (fieldDef.type === 'ref' && frontmatter[fieldName]) {
+          const targetId = String(frontmatter[fieldName]);
+          const targetDoc = this.backend.getDocument(toDocId(targetId));
+          if (targetDoc) {
+            const targetFm = await this.readFrontmatter(targetDoc);
+            resolvedRefs[fieldName] = {
+              docId: targetId,
+              name: String(targetFm['name'] ?? targetFm['title'] ?? targetId),
+            };
+          }
+        }
+      }
+    }
+
+    // Extracted objects for this doc
+    const objects = this.backend.findObjects({ docId: id, limit: 50 });
+
+    // Related records
+    const rels = this.backend.getRelationships(id, 'both');
+    const outgoing: GetFullResult['related']['outgoing'] = [];
+    const incoming: GetFullResult['related']['incoming'] = [];
+
+    for (const rel of rels) {
+      if (rel.sourceDocId === id) {
+        const target = this.backend.getDocument(rel.targetDocId);
+        outgoing.push({
+          docId: rel.targetDocId as string,
+          docType: (target?.docType ?? 'unknown') as string,
+          field: rel.field,
+        });
+      } else {
+        const source = this.backend.getDocument(rel.sourceDocId);
+        incoming.push({
+          docId: rel.sourceDocId as string,
+          docType: (source?.docType ?? 'unknown') as string,
+          field: rel.field,
+        });
+      }
+    }
+
+    // Latest incoming note (find most recent note-type doc that references this one)
+    let latestNote: GetFullResult['latestNote'] = null;
+    if (this.gitLayer) {
+      for (const inc of incoming) {
+        const incDoc = this.backend.getDocument(toDocId(inc.docId));
+        if (!incDoc) continue;
+        // Look for note-like types (convention: type name contains "note")
+        if (!(inc.docType.includes('note'))) continue;
+
+        try {
+          const history = await this.gitLayer.history(incDoc.filePath as string, { limit: 1 });
+          if (history.length > 0) {
+            const entry = history[0]!;
+            if (!latestNote || entry.timestamp > latestNote.timestamp) {
+              latestNote = {
+                docId: inc.docId,
+                summary: entry.summary,
+                timestamp: entry.timestamp,
+              };
+            }
+          }
+        } catch {
+          // Git failure is non-fatal
+        }
+      }
+    }
+
+    return ok({
+      docId: doc.docId,
+      docType: doc.docType,
+      frontmatter,
+      resolvedRefs,
+      objects,
+      related: { outgoing, incoming },
+      latestNote,
+    });
   }
 
   findDocuments(query: DocumentQuery): Result<FindResult> {
@@ -511,9 +656,10 @@ export class MaadEngine {
       return singleErr('FILE_READ_ERROR', `Cannot read file: ${absPath}`);
     }
 
-    // Update frontmatter
+    // Read frontmatter from file and update
+    const currentFm = await this.readFrontmatter(doc);
     const changedFields: string[] = [];
-    const updatedFm = { ...doc.frontmatter };
+    const updatedFm = { ...currentFm };
     if (fields) {
       for (const [key, value] of Object.entries(fields)) {
         if (updatedFm[key] !== value) {
@@ -707,9 +853,89 @@ export class MaadEngine {
     };
   }
 
+  async summary(): Promise<SummaryResult> {
+    this.assertInit();
+    const stats = this.backend.getStats();
+
+    const types = [...this.registry.types.values()].map(rt => ({
+      type: rt.name as string,
+      count: stats.documentCountByType[rt.name as string] ?? 0,
+      sampleIds: this.backend.getSampleDocIds(rt.name, 3).map(id => id as string),
+    }));
+
+    const subtypeInventory = this.backend.getSubtypeInventory(20);
+
+    // Recent activity from git (most recent per doc, top 10)
+    let recentActivity: SummaryResult['recentActivity'] = [];
+    if (this.gitLayer) {
+      try {
+        const entries = await this.gitLayer.audit();
+        recentActivity = entries.slice(0, 10).map(e => ({
+          action: e.lastAction,
+          docId: e.docId as string,
+          summary: e.lastSummary,
+          timestamp: e.lastTimestamp,
+        }));
+      } catch {
+        // Git audit failure is non-fatal
+      }
+    }
+
+    return {
+      types,
+      totalDocuments: stats.totalDocuments,
+      totalObjects: stats.totalObjects,
+      totalRelationships: stats.totalRelationships,
+      lastIndexedAt: stats.lastIndexedAt,
+      subtypeInventory,
+      recentActivity,
+    };
+  }
+
   getSchema(dt: DocType): SchemaDefinition | undefined {
     this.assertInit();
     return this.schemaStore.getSchemaForType(dt);
+  }
+
+  schemaInfo(dt: DocType): Result<SchemaInfoResult> {
+    this.assertInit();
+
+    const regType = this.registry.types.get(dt);
+    if (!regType) return singleErr('UNKNOWN_TYPE', `Type "${dt as string}" not in registry`);
+
+    const schema = this.schemaStore.getSchemaForType(dt);
+    if (!schema) return singleErr('SCHEMA_NOT_FOUND', `No schema for type "${dt as string}"`);
+
+    const fields: SchemaInfoResult['fields'] = [];
+    for (const [name, field] of schema.fields) {
+      let typeStr = field.type as string;
+      if (field.type === 'ref' && field.target) typeStr = `ref -> ${field.target as string}`;
+      if (field.type === 'list' && field.itemType) {
+        typeStr = `list of ${field.itemType}`;
+        if (field.target) typeStr += ` -> ${field.target as string}`;
+      }
+
+      fields.push({
+        name,
+        type: typeStr,
+        required: schema.required.includes(name),
+        indexed: field.index,
+        values: field.values,
+        target: field.target as string | null,
+        default: field.defaultValue,
+      });
+    }
+
+    const templateHeadings = schema.template
+      ? schema.template.map(t => ({ level: t.level, text: t.text }))
+      : null;
+
+    return ok({
+      type: dt as string,
+      schemaRef: regType.schemaRef as string,
+      fields,
+      templateHeadings,
+    });
   }
 
   async inspect(id: DocId): Promise<Result<InspectResult>> {
@@ -718,9 +944,10 @@ export class MaadEngine {
     const doc = this.backend.getDocument(id);
     if (!doc) return singleErr('FILE_NOT_FOUND', `Document "${id as string}" not found`);
 
+    const frontmatter = await this.readFrontmatter(doc);
     const schema = this.schemaStore.getSchemaForType(doc.docType);
     const validation = schema
-      ? validateFrontmatter(doc.frontmatter, schema, this.registry)
+      ? validateFrontmatter(frontmatter, schema, this.registry)
       : { valid: false, errors: [{ field: 'doc_type', message: 'No schema found', location: null }] };
 
     const blocks = this.backend.getBlocks(id);
@@ -753,7 +980,8 @@ export class MaadEngine {
       const schema = this.schemaStore.getSchemaForType(doc.docType);
       if (!schema) return singleErr('SCHEMA_NOT_FOUND', `No schema for type "${doc.docType as string}"`);
 
-      const result = validateFrontmatter(doc.frontmatter, schema, this.registry);
+      const frontmatter = await this.readFrontmatter(doc);
+      const result = validateFrontmatter(frontmatter, schema, this.registry);
       return ok({
         total: 1,
         valid: result.valid ? 1 : 0,
@@ -778,7 +1006,8 @@ export class MaadEngine {
         continue;
       }
 
-      const result = validateFrontmatter(doc.frontmatter, schema, this.registry);
+      const frontmatter = await this.readFrontmatter(doc);
+      const result = validateFrontmatter(frontmatter, schema, this.registry);
       if (result.valid) {
         report.valid++;
       } else {
@@ -871,6 +1100,25 @@ export class MaadEngine {
     if (!this.initialized) {
       throw new Error('MaadEngine not initialized. Call init() first.');
     }
+  }
+
+  async readFrontmatter(doc: DocumentRecord): Promise<Record<string, unknown>> {
+    const absPath = path.join(this.projectRoot, doc.filePath as string);
+    const raw = await readFile(absPath, 'utf-8');
+    const parsed = matter(raw);
+    return parsed.data as Record<string, unknown>;
+  }
+
+  async readBlockContent(doc: DocumentRecord, startLine: number, endLine: number, isPreamble: boolean): Promise<string> {
+    const absPath = path.join(this.projectRoot, doc.filePath as string);
+    const raw = await readFile(absPath, 'utf-8');
+    const lines = raw.split('\n');
+    // For heading blocks: startLine is the heading — content starts one line after.
+    // For preamble blocks: content starts at startLine.
+    // Lines are 1-based. Array is 0-based.
+    const contentStart = isPreamble ? startLine - 1 : startLine;
+    const contentEnd = endLine; // endLine is inclusive; slice is exclusive → use endLine directly
+    return lines.slice(contentStart, contentEnd).join('\n').trim();
   }
 
   private async gitCommit(opts: CommitOptions): Promise<void> {

@@ -154,7 +154,7 @@ describe('reindex stale cleanup', () => {
     expect(createResult.ok).toBe(true);
 
     // Verify it's in the index
-    const getResult = engine.findDocuments({ docType: docType('client'), includeFrontmatter: true });
+    const getResult = engine.findDocuments({ docType: docType('client') });
     expect(getResult.ok).toBe(true);
     if (!getResult.ok) return;
     const staleBefore = getResult.value.results.find(r => (r.docId as string) === 'cli-stale');

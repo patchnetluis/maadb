@@ -58,7 +58,7 @@ Content.`;
     expect(blocks).toHaveLength(2);
     expect(blocks[0]!.id).toBeNull();
     expect(blocks[0]!.heading).toBe('');
-    expect(blocks[0]!.content).toContain('Some intro text.');
+    expect(blocks[0]!.level).toBe(0);
     expect(blocks[1]!.heading).toBe('First Heading');
   });
 

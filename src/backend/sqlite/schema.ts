@@ -12,7 +12,6 @@ CREATE TABLE IF NOT EXISTS documents (
   file_path    TEXT NOT NULL UNIQUE,
   file_hash    TEXT NOT NULL,
   version      INTEGER NOT NULL DEFAULT 1,
-  frontmatter  TEXT NOT NULL,
   deleted      INTEGER NOT NULL DEFAULT 0,
   indexed_at   TEXT NOT NULL
 );
@@ -59,8 +58,7 @@ CREATE TABLE IF NOT EXISTS blocks (
   heading      TEXT NOT NULL,
   level        INTEGER NOT NULL,
   start_line   INTEGER NOT NULL,
-  end_line     INTEGER NOT NULL,
-  content      TEXT NOT NULL DEFAULT ''
+  end_line     INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_blocks_doc_id ON blocks(doc_id);
 CREATE INDEX IF NOT EXISTS idx_blocks_block_id ON blocks(block_id);

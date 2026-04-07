@@ -86,7 +86,6 @@ export function parseBlocks(body: string, bodyStartLine: number): ParsedBlock[] 
         level: 0,
         startLine: bodyStartLine,
         endLine: bodyStartLine + firstHeadingIndex - 1,
-        content: preambleContent,
       });
     }
   }
@@ -96,9 +95,6 @@ export function parseBlocks(body: string, bodyStartLine: number): ParsedBlock[] 
     const current = headings[h]!;
     const nextIndex = h + 1 < headings.length ? headings[h + 1]!.contentStartIndex - 1 : lines.length;
 
-    const contentLines = lines.slice(current.contentStartIndex, nextIndex);
-    const content = contentLines.join('\n').trim();
-
     const endLine = bodyStartLine + nextIndex - 1;
 
     blocks.push({
@@ -107,7 +103,6 @@ export function parseBlocks(body: string, bodyStartLine: number): ParsedBlock[] 
       level: current.level,
       startLine: current.startLine,
       endLine,
-      content,
     });
   }
 

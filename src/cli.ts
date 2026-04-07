@@ -77,6 +77,12 @@ async function main(): Promise<void> {
     case 'inspect':
       await cmdInspect();
       break;
+    case 'summary':
+      await cmdSummary();
+      break;
+    case 'schema':
+      await cmdSchema();
+      break;
     case 'serve':
       console.log('MCP server is on the roadmap. Use the engine library or CLI for now.');
       break;
@@ -295,8 +301,8 @@ async function cmdQuery(): Promise<void> {
   const hasFilters = Object.keys(filters).length > 0;
   const result = engine.findDocuments(
     hasFilters
-      ? { docType: docType(typeArg), filters, includeFrontmatter: true }
-      : { docType: docType(typeArg), includeFrontmatter: true },
+      ? { docType: docType(typeArg), filters }
+      : { docType: docType(typeArg) },
   );
 
   if (!result.ok) {
@@ -321,15 +327,28 @@ async function cmdDescribe(): Promise<void> {
 
 async function cmdGet(): Promise<void> {
   const id = args[1];
-  const depth = (args[2] ?? 'hot') as 'hot' | 'warm' | 'cold';
+  const depth = (args[2] ?? 'hot') as 'hot' | 'warm' | 'cold' | 'full';
   const block = args[3];
 
   if (!id) {
-    console.error('Usage: maad get <doc_id> [hot|warm|cold] [block_id]');
+    console.error('Usage: maad get <doc_id> [hot|warm|cold|full] [block_id]');
     process.exit(1);
   }
 
   const engine = await initEngine();
+
+  if (depth === 'full') {
+    const result = await engine.getDocumentFull(docId(id));
+    if (!result.ok) {
+      console.error('Get failed:');
+      for (const e of result.errors) console.error(`  ${e.code}: ${e.message}`);
+      engine.close();
+      process.exit(1);
+    }
+    console.log(JSON.stringify(result.value, null, 2));
+    engine.close();
+    return;
+  }
 
   const result = await engine.getDocument(docId(id), depth, block);
   if (!result.ok) {
@@ -561,6 +580,36 @@ async function cmdInspect(): Promise<void> {
   engine.close();
 }
 
+async function cmdSummary(): Promise<void> {
+  const engine = await initEngine();
+  await engine.indexAll();
+
+  const result = await engine.summary();
+  console.log(JSON.stringify(result, null, 2));
+  engine.close();
+}
+
+async function cmdSchema(): Promise<void> {
+  const typeArg = args[1];
+  if (!typeArg) {
+    console.error('Usage: maad schema <doc_type>');
+    process.exit(1);
+  }
+
+  const engine = await initEngine();
+
+  const result = engine.schemaInfo(docType(typeArg));
+  if (!result.ok) {
+    console.error('Schema failed:');
+    for (const e of result.errors) console.error(`  ${e.code}: ${e.message}`);
+    engine.close();
+    process.exit(1);
+  }
+
+  console.log(JSON.stringify(result.value, null, 2));
+  engine.close();
+}
+
 // --- Helpers ---------------------------------------------------------------
 
 async function initEngine(): Promise<MaadEngine> {
@@ -582,12 +631,14 @@ Usage: maad <command> [options]
 
 Commands:
   init [dir]                        Initialize a new MAAD project
+  summary                           One-call project orientation (types, objects, activity)
   describe                          Show project overview
-  get <doc_id> [depth] [block]      Read a document (hot/warm/cold)
+  get <doc_id> [depth] [block]      Read a document (hot/warm/cold/full)
   query <type> [--filter k=v]       Find documents by type and filters
   search <primitive> [--subtype s]  Search extracted objects
   related <doc_id> [direction]      Show related documents
   inspect <doc_id>                  Show full engine internals for a document
+  schema <type>                     Show field definitions for a type (for writes)
   create <type> --field k=v [...]   Create a new document
   update <doc_id> --field k=v [...] Update a document's fields or body
   validate [doc_id]                 Validate one or all documents

@@ -31,7 +31,6 @@ function makeDoc(id: string, type: string, path: string): DocumentRecord {
     filePath: filePath(path),
     fileHash: 'hash_' + id,
     version: 1,
-    frontmatter: { doc_id: id, doc_type: type, name: 'Test' },
     deleted: false,
     indexedAt: new Date().toISOString(),
   };
@@ -61,7 +60,7 @@ describe('SqliteBackend', () => {
       expect(result).not.toBeNull();
       expect(result!.docId).toBe('cli-acme');
       expect(result!.docType).toBe('client');
-      expect(result!.frontmatter.name).toBe('Test');
+      expect(result!.fileHash).toBe('hash_cli-acme');
     });
 
     it('gets document by path', () => {
@@ -80,7 +79,7 @@ describe('SqliteBackend', () => {
       const doc = makeDoc('cli-acme', 'client', 'clients/cli-acme.md');
       backend.putDocument(doc);
       backend.putObjects(docId('cli-acme'), [makeObject('cli-acme', 'entity', 'name', 'Acme')]);
-      backend.putBlocks(docId('cli-acme'), [{ id: blockId('main'), heading: 'Acme', level: 1, startLine: 5, endLine: 10, content: 'Content' }]);
+      backend.putBlocks(docId('cli-acme'), [{ id: blockId('main'), heading: 'Acme', level: 1, startLine: 5, endLine: 10 }]);
 
       backend.removeDocument(docId('cli-acme'));
 
@@ -129,15 +128,6 @@ describe('SqliteBackend', () => {
       });
       expect(results).toHaveLength(1);
       expect(results[0]!.docId).toBe('cli-acme');
-    });
-
-    it('includes frontmatter when requested', () => {
-      const results = backend.findDocuments({
-        docType: docType('client'),
-        includeFrontmatter: true,
-      });
-      expect(results[0]!.frontmatter).toBeDefined();
-      expect(results[0]!.frontmatter!.name).toBe('Test');
     });
 
     it('handles numeric range queries correctly', () => {
@@ -279,8 +269,8 @@ describe('SqliteBackend', () => {
     it('puts and gets blocks', () => {
       backend.putDocument(makeDoc('cas-001', 'case', 'cases/cas-001.md'));
       const blocks: ParsedBlock[] = [
-        { id: blockId('summary'), heading: 'Summary', level: 1, startLine: 5, endLine: 10, content: 'Summary content' },
-        { id: blockId('timeline'), heading: 'Timeline', level: 2, startLine: 12, endLine: 20, content: 'Timeline content' },
+        { id: blockId('summary'), heading: 'Summary', level: 1, startLine: 5, endLine: 10 },
+        { id: blockId('timeline'), heading: 'Timeline', level: 2, startLine: 12, endLine: 20 },
       ];
       backend.putBlocks(docId('cas-001'), blocks);
 
@@ -288,7 +278,8 @@ describe('SqliteBackend', () => {
       expect(result).toHaveLength(2);
       expect(result[0]!.id).toBe('summary');
       expect(result[1]!.id).toBe('timeline');
-      expect(result[0]!.content).toBe('Summary content');
+      expect(result[0]!.startLine).toBe(5);
+      expect(result[0]!.endLine).toBe(10);
     });
   });
 
@@ -298,7 +289,7 @@ describe('SqliteBackend', () => {
       const objects = [makeObject('cli-acme', 'entity', 'name', 'Acme')];
       const rels: Relationship[] = [];
       const blocks: ParsedBlock[] = [
-        { id: blockId('main'), heading: 'Acme', level: 1, startLine: 5, endLine: 10, content: 'Main' },
+        { id: blockId('main'), heading: 'Acme', level: 1, startLine: 5, endLine: 10 },
       ];
       const fields = [{ name: 'status', value: 'active', numericValue: null, type: 'enum' }];
 
@@ -344,6 +335,38 @@ describe('SqliteBackend', () => {
       expect(stats.totalRelationships).toBe(1);
       expect(stats.documentCountByType['client']).toBe(1);
       expect(stats.documentCountByType['case']).toBe(1);
+    });
+  });
+
+  describe('aggregation', () => {
+    it('returns subtype inventory', () => {
+      backend.putDocument(makeDoc('cli-acme', 'client', 'clients/cli-acme.md'));
+      backend.putObjects(docId('cli-acme'), [
+        makeObject('cli-acme', 'entity', 'person', 'Alice'),
+        makeObject('cli-acme', 'entity', 'person', 'Bob'),
+        makeObject('cli-acme', 'entity', 'person', 'Alice'),
+        makeObject('cli-acme', 'date', 'date', '2026-01-01'),
+      ]);
+
+      const inventory = backend.getSubtypeInventory(10);
+      expect(inventory.length).toBe(2); // entity/person and date/date
+
+      const personEntry = inventory.find(e => e.subtype === 'person');
+      expect(personEntry).toBeDefined();
+      expect(personEntry!.count).toBe(3);
+      expect(personEntry!.topValues[0]).toBe('Alice'); // most frequent first
+    });
+
+    it('returns sample doc IDs', () => {
+      backend.putDocument(makeDoc('cli-a', 'client', 'clients/cli-a.md'));
+      backend.putDocument(makeDoc('cli-b', 'client', 'clients/cli-b.md'));
+      backend.putDocument(makeDoc('cas-1', 'case', 'cases/cas-1.md'));
+
+      const clientIds = backend.getSampleDocIds(docType('client'), 5);
+      expect(clientIds).toHaveLength(2);
+
+      const caseIds = backend.getSampleDocIds(docType('case'), 5);
+      expect(caseIds).toHaveLength(1);
     });
   });
 });

@@ -1,9 +1,12 @@
 ---
 enabled: true
-current: 0.1.2
+current: 0.1.3
 ---
 
 # Version History
+
+## 0.1.3 — 2026-04-07
+Pointer-only DB refactor (frontmatter/content stripped from SQLite, all reads from disk). Three new LLM UX commands: summary (one-call orientation), get full (resolved record with refs/objects/related), schema (field definitions for writes). Static MAAD.md (no volatile counts). 203 tests passing.
 
 ## 0.1.2 — 2026-04-07
 CLI write commands: create, update, inspect. MAAD.md auto-generation on init and reindex (LLM instruction file with full type/command reference). SQLite busy_timeout for concurrent read tolerance. Date extraction fix (gray-matter Date objects now convert to ISO). Roadmap updated with maad-demo, maad-benchmark, and three-repo structure. 192 tests passing.

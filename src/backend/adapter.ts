@@ -38,6 +38,10 @@ export interface MaadBackend {
   getRelationships(docId: DocId, direction: 'outgoing' | 'incoming' | 'both'): Relationship[];
   getBlocks(docId: DocId): ParsedBlock[];
 
+  // Aggregation
+  getSubtypeInventory(limit: number): Array<{ primitive: string; subtype: string; count: number; topValues: string[] }>;
+  getSampleDocIds(docType: DocType, limit: number): DocId[];
+
   // Maintenance
   removeDocument(docId: DocId): void;
   getFileHash(path: FilePath): string | null;

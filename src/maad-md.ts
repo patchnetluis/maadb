@@ -58,32 +58,23 @@ ${cmd} <command> [args]
 All output is JSON unless noted.`;
 }
 
-function generateQuickStart(cmd: string, ctx: MaadMdContext): string {
-  const totalDocs = ctx.stats?.totalDocuments ?? 0;
-  const typeList = [...ctx.registry.types.values()].map(t => `\`${t.name as string}\``).join(', ');
-  const typeCount = ctx.registry.types.size;
-
-  // Build a realistic first-run sequence using actual data from this project
-  const firstType = [...ctx.registry.types.values()][0];
-  const firstTypeStr = firstType ? (firstType.name as string) : 'type';
-
+function generateQuickStart(cmd: string, _ctx: MaadMdContext): string {
   return `## Quick Start (do this first)
 
-This project has **${totalDocs} documents** across **${typeCount} types**: ${typeList}.
+**Step 1 — Orient yourself (one call):**
+\`\`\`
+${cmd} summary
+\`\`\`
+Returns: types + counts, sample doc_ids, extracted object inventory, recent activity.
 
-**Step 1 — See what exists:**
-\`\`\`
-${cmd} describe
-\`\`\`
-
-**Step 2 — Find records:**
-\`\`\`
-${cmd} query ${firstTypeStr}
-\`\`\`
-
-**Step 3 — Read a record (frontmatter only, minimal tokens):**
+**Step 2 — Read a record:**
 \`\`\`
 ${cmd} get <doc_id> hot
+\`\`\`
+
+**Step 3 — Get a fully resolved record (refs resolved, objects, related):**
+\`\`\`
+${cmd} get <doc_id> full
 \`\`\`
 
 **Step 4 — Read a specific section:**
@@ -91,17 +82,12 @@ ${cmd} get <doc_id> hot
 ${cmd} get <doc_id> warm <block_id>
 \`\`\`
 
-**Step 5 — See what's connected:**
+**Step 5 — Before writing, check what fields a type needs:**
 \`\`\`
-${cmd} related <doc_id> both
-\`\`\`
-
-**Step 6 — Search across all documents:**
-\`\`\`
-${cmd} search entity --subtype person
+${cmd} schema <type>
 \`\`\`
 
-You now know the project. Most questions can be answered from steps 2-5 without a full file read.`;
+Most questions can be answered from steps 1-3 without a full file read.`;
 }
 
 function generateFullCommandRef(cmd: string): string {
@@ -110,10 +96,12 @@ function generateFullCommandRef(cmd: string): string {
 ### Read
 | Command | What it does |
 |---------|-------------|
+| \`summary\` | **Start here.** Types, counts, sample IDs, object inventory, activity |
 | \`describe\` | Project overview: types, doc counts, primitives |
 | \`get <doc_id> hot\` | Frontmatter only (cheapest read) |
 | \`get <doc_id> warm <block>\` | Frontmatter + one section |
 | \`get <doc_id> cold\` | Full document (expensive — use sparingly) |
+| \`get <doc_id> full\` | Resolved record: refs resolved, objects, related, latest note |
 | \`query <type>\` | All documents of a type |
 | \`query <type> --filter field=value\` | Filtered by indexed field |
 | \`search <primitive>\` | Cross-document object search |
@@ -123,6 +111,7 @@ function generateFullCommandRef(cmd: string): string {
 | \`related <doc_id> outgoing\` | Documents this one references |
 | \`related <doc_id> incoming\` | Documents that reference this one |
 | \`inspect <doc_id>\` | Full engine internals: blocks, objects, relationships, validation |
+| \`schema <type>\` | Field definitions for a type (what to pass to create/update) |
 
 ### Write
 | Command | What it does |
@@ -178,13 +167,14 @@ Inline annotations in markdown body use \`[[type:value|label]]\` syntax. The eng
 function generateRules(): string {
   return `## Rules
 
-1. **Run \`describe\` first** in every new session
-2. **Use \`hot\` reads by default** — escalate to \`warm\` then \`cold\` only when needed
-3. **Use the CLI for writes** — never edit markdown files directly
-4. **Use \`search\` for cross-document queries** — don't open files to find people/dates/amounts
-5. **Use \`related\` for graph traversal** — don't manually search for connected docs
-6. **Cite \`doc_id\` and \`block_id\`** in answers for traceability
-7. **\`reindex --force\`** recovers from any stale state`;
+1. **Run \`summary\` first** in every new session — one call to orient
+2. **Use \`hot\` reads by default** — escalate to \`full\`, \`warm\`, then \`cold\` only when needed
+3. **Use \`schema <type>\` before writes** — know what fields are required
+4. **Use the CLI for writes** — never edit markdown files directly
+5. **Use \`search\` for cross-document queries** — don't open files to find people/dates/amounts
+6. **Use \`related\` for graph traversal** — don't manually search for connected docs
+7. **Cite \`doc_id\` and \`block_id\`** in answers for traceability
+8. **\`reindex --force\`** recovers from any stale state`;
 }
 
 function generateFeedback(): string {

@@ -195,3 +195,94 @@ describe('validate', () => {
     expect(result.value.valid).toBe(4);
   });
 });
+
+describe('summary', () => {
+  it('returns one-call project orientation', async () => {
+    const result = await engine.summary();
+    expect(result.totalDocuments).toBe(4);
+    expect(result.types.length).toBe(4);
+
+    // Each type has a count and sample IDs
+    const clientType = result.types.find(t => t.type === 'client');
+    expect(clientType).toBeDefined();
+    expect(clientType!.count).toBe(1);
+    expect(clientType!.sampleIds).toContain('cli-acme');
+
+    // Subtype inventory should have entries
+    expect(result.subtypeInventory.length).toBeGreaterThan(0);
+    // Should have entity/person from the case's inline annotations
+    const personEntry = result.subtypeInventory.find(s => s.subtype === 'person');
+    expect(personEntry).toBeDefined();
+    expect(personEntry!.topValues.length).toBeGreaterThan(0);
+
+    // Stats
+    expect(result.totalObjects).toBeGreaterThan(0);
+    expect(result.totalRelationships).toBeGreaterThan(0);
+  });
+});
+
+describe('getDocumentFull', () => {
+  it('returns resolved record with refs, objects, and related', async () => {
+    const result = await engine.getDocumentFull(docId('cas-2026-001'));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const full = result.value;
+    expect(full.docType).toBe('case');
+    expect(full.frontmatter['title']).toBe('Contract Review Dispute');
+
+    // Ref resolution: client field should resolve to Acme Corporation
+    expect(full.resolvedRefs['client']).toBeDefined();
+    expect(full.resolvedRefs['client']!.docId).toBe('cli-acme');
+    expect(full.resolvedRefs['client']!.name).toBe('Acme Corporation');
+
+    // Extracted objects
+    expect(full.objects.length).toBeGreaterThan(0);
+
+    // Related records
+    expect(full.related.outgoing.length).toBeGreaterThanOrEqual(2);
+    const outgoingIds = full.related.outgoing.map(r => r.docId);
+    expect(outgoingIds).toContain('cli-acme');
+  });
+
+  it('returns error for missing document', async () => {
+    const result = await engine.getDocumentFull(docId('nonexistent'));
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe('schemaInfo', () => {
+  it('returns field definitions for a type', () => {
+    const result = engine.schemaInfo(docType('client'));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const info = result.value;
+    expect(info.type).toBe('client');
+    expect(info.fields.length).toBeGreaterThan(0);
+
+    // Name field should be required
+    const nameField = info.fields.find(f => f.name === 'name');
+    expect(nameField).toBeDefined();
+    expect(nameField!.required).toBe(true);
+    expect(nameField!.type).toBe('string');
+
+    // Status should be an enum with values
+    const statusField = info.fields.find(f => f.name === 'status');
+    expect(statusField).toBeDefined();
+    expect(statusField!.type).toBe('enum');
+    expect(statusField!.values).toBeDefined();
+    expect(statusField!.values!.length).toBeGreaterThan(0);
+
+    // primary_contact should be a ref
+    const contactField = info.fields.find(f => f.name === 'primary_contact');
+    expect(contactField).toBeDefined();
+    expect(contactField!.type).toContain('ref');
+    expect(contactField!.target).toBe('contact');
+  });
+
+  it('returns error for unknown type', () => {
+    const result = engine.schemaInfo(docType('nonexistent'));
+    expect(result.ok).toBe(false);
+  });
+});

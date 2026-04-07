@@ -52,8 +52,8 @@ export class SqliteBackend implements MaadBackend {
   putDocument(doc: DocumentRecord): void {
     this.db.prepare(`
       INSERT OR REPLACE INTO documents
-        (doc_id, doc_type, schema_ref, file_path, file_hash, version, frontmatter, deleted, indexed_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (doc_id, doc_type, schema_ref, file_path, file_hash, version, deleted, indexed_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       doc.docId as string,
       doc.docType as string,
@@ -61,7 +61,6 @@ export class SqliteBackend implements MaadBackend {
       doc.filePath as string,
       doc.fileHash,
       doc.version,
-      JSON.stringify(doc.frontmatter),
       doc.deleted ? 1 : 0,
       doc.indexedAt,
     );
@@ -117,8 +116,8 @@ export class SqliteBackend implements MaadBackend {
     this.db.prepare('DELETE FROM blocks WHERE doc_id = ?').run(docId as string);
 
     const insert = this.db.prepare(`
-      INSERT INTO blocks (doc_id, block_id, heading, level, start_line, end_line, content)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO blocks (doc_id, block_id, heading, level, start_line, end_line)
+      VALUES (?, ?, ?, ?, ?, ?)
     `);
 
     for (const block of blocks) {
@@ -129,7 +128,6 @@ export class SqliteBackend implements MaadBackend {
         block.level,
         block.startLine,
         block.endLine,
-        block.content,
       );
     }
   }
@@ -223,7 +221,6 @@ export class SqliteBackend implements MaadBackend {
       docId: toDocId(row.doc_id),
       docType: toDocType(row.doc_type),
       filePath: toFilePath(row.file_path),
-      frontmatter: query.includeFrontmatter ? JSON.parse(row.frontmatter) as Record<string, unknown> : undefined,
     }));
   }
 
@@ -329,8 +326,45 @@ export class SqliteBackend implements MaadBackend {
       level: row.level,
       startLine: row.start_line,
       endLine: row.end_line,
-      content: row.content,
     }));
+  }
+
+  // --- Aggregation ---------------------------------------------------------
+
+  getSubtypeInventory(limit: number): Array<{ primitive: string; subtype: string; count: number; topValues: string[] }> {
+    const groups = this.db.prepare(`
+      SELECT primitive, subtype, COUNT(*) as cnt
+      FROM objects
+      GROUP BY primitive, subtype
+      ORDER BY cnt DESC
+      LIMIT ?
+    `).all(limit) as Array<{ primitive: string; subtype: string; cnt: number }>;
+
+    return groups.map(g => {
+      const topRows = this.db.prepare(`
+        SELECT value, COUNT(*) as cnt
+        FROM objects
+        WHERE primitive = ? AND subtype = ?
+        GROUP BY value
+        ORDER BY cnt DESC
+        LIMIT 5
+      `).all(g.primitive, g.subtype) as Array<{ value: string; cnt: number }>;
+
+      return {
+        primitive: g.primitive,
+        subtype: g.subtype,
+        count: g.cnt,
+        topValues: topRows.map(r => r.value),
+      };
+    });
+  }
+
+  getSampleDocIds(dt: DocType, limit: number): DocId[] {
+    const rows = this.db.prepare(
+      'SELECT doc_id FROM documents WHERE doc_type = ? AND deleted = 0 ORDER BY indexed_at DESC LIMIT ?',
+    ).all(dt as string, limit) as Array<{ doc_id: string }>;
+
+    return rows.map(r => toDocId(r.doc_id));
   }
 
   // --- Maintenance ---------------------------------------------------------
@@ -435,7 +469,6 @@ function rowToDocument(row: RawDocRow): DocumentRecord {
     filePath: toFilePath(row.file_path),
     fileHash: row.file_hash,
     version: row.version,
-    frontmatter: JSON.parse(row.frontmatter) as Record<string, unknown>,
     deleted: row.deleted === 1,
     indexedAt: row.indexed_at,
   };
@@ -450,7 +483,6 @@ interface RawDocRow {
   file_path: string;
   file_hash: string;
   version: number;
-  frontmatter: string;
   deleted: number;
   indexed_at: string;
 }
@@ -484,5 +516,4 @@ interface RawBlockRow {
   level: number;
   start_line: number;
   end_line: number;
-  content: string;
 }

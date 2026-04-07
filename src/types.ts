@@ -175,7 +175,6 @@ export interface ParsedBlock {
   level: number;
   startLine: number;
   endLine: number;
-  content: string;
 }
 
 export interface ValueCall {
@@ -323,7 +322,6 @@ export interface DocumentRecord {
   filePath: FilePath;
   fileHash: string;
   version: number;
-  frontmatter: Record<string, unknown>;
   deleted: boolean;
   indexedAt: string;
 }
@@ -338,7 +336,6 @@ export type FilterCondition =
 export interface DocumentQuery {
   docType?: DocType;
   filters?: Record<string, FilterCondition>;
-  includeFrontmatter?: boolean;
   limit?: number;
   offset?: number;
 }
@@ -358,7 +355,6 @@ export interface DocumentMatch {
   docId: DocId;
   docType: DocType;
   filePath: FilePath;
-  frontmatter?: Record<string, unknown> | undefined;
 }
 
 export interface ObjectMatch {
