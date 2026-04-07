@@ -1,0 +1,20 @@
+type: contact
+version: 1
+required:
+  - doc_id
+  - name
+fields:
+  name:
+    type: string
+    index: true
+  email:
+    type: string
+    index: true
+  phone:
+    type: string
+  client:
+    type: ref
+    target: client
+    index: true
+  role:
+    type: string

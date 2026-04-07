@@ -1,0 +1,46 @@
+type: case
+version: 1
+required:
+  - doc_id
+  - title
+  - client
+  - status
+fields:
+  title:
+    type: string
+    index: true
+  client:
+    type: ref
+    target: client
+    index: true
+  primary_contact:
+    type: ref
+    target: contact
+    index: true
+  status:
+    type: enum
+    values: [open, pending, closed]
+    index: true
+  opened_at:
+    type: date
+    role: created_at
+    format: "YYYY-MM-DD"
+    index: true
+  priority:
+    type: enum
+    values: [low, medium, high]
+    index: true
+template:
+  headings:
+    - level: 1
+      text: "{{title}}"
+      id: summary
+    - level: 2
+      text: Details
+      id: details
+    - level: 2
+      text: Timeline
+      id: timeline
+    - level: 2
+      text: Notes
+      id: notes

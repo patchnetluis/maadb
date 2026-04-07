@@ -1,0 +1,23 @@
+type: case_note
+version: 1
+required:
+  - doc_id
+  - case
+  - author
+  - noted_at
+fields:
+  case:
+    type: ref
+    target: case
+    index: true
+  author:
+    type: string
+    index: true
+  noted_at:
+    type: date
+    role: created_at
+    index: true
+  note_type:
+    type: enum
+    values: [update, decision, question, action]
+    index: true

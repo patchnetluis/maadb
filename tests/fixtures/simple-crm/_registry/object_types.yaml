@@ -1,0 +1,22 @@
+types:
+  client:
+    path: clients/
+    id_prefix: cli
+    schema: client.v1
+  contact:
+    path: contacts/
+    id_prefix: con
+    schema: contact.v1
+  case:
+    path: cases/
+    id_prefix: cas
+    schema: case.v1
+  case_note:
+    path: case-notes/
+    id_prefix: note
+    schema: case_note.v1
+
+extraction:
+  subtypes:
+    vehicle: entity
+    officer: entity

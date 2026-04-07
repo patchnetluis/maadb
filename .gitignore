@@ -1,0 +1,6 @@
+node_modules/
+dist/
+_backend/
+
+# Internal dev log — local only, public release notes live in GitHub Releases
+CHANGELOG.md

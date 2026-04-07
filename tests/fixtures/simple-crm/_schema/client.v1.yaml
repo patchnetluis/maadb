@@ -1,0 +1,21 @@
+type: client
+version: 1
+required:
+  - doc_id
+  - name
+  - status
+fields:
+  name:
+    type: string
+    index: true
+  status:
+    type: enum
+    values: [active, inactive, prospect]
+    index: true
+  primary_contact:
+    type: ref
+    target: contact
+    index: true
+  tags:
+    type: list
+    item_type: string
