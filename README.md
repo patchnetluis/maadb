@@ -198,6 +198,39 @@ Four audit commands (`history`, `diff`, `snapshot`, `audit`) give full traceabil
 
 `SCHEMA.md` is a deep structural reference — read it when `schema <type>` isn't enough.
 
+### Engine structure
+
+```
+src/
+  engine/
+    index.ts             MaadEngine facade (thin, delegates to domains)
+    context.ts           EngineContext shared state
+    types.ts             Result interfaces
+    indexing.ts           indexAll, indexFile, processDocument, reindex
+    reads.ts             get, find, search, related, describe, summary, schema
+    composites.ts        getDocumentFull (Tier 2, provisional)
+    writes.ts            create, update, delete
+    maintenance.ts       validate
+    audit.ts             history, diff, snapshot, audit
+    helpers.ts           readFrontmatter, readBlockContent, generateDocId
+  cli/
+    index.ts             Dispatch + help
+    commands/
+      discover.ts        scan, summary, describe
+      read.ts            get, query, search, related, schema
+      write.ts           create, update
+      maintain.ts        init, validate, reindex, parse
+      audit.ts           history, audit
+  parser/                Markdown → ParsedDocument
+  schema/                Schema loading + validation
+  registry/              Type registry
+  extractor/             Object + relationship extraction
+  backend/               SQLite adapter (pointer-only)
+  writer/                Deterministic markdown generation
+  git/                   Auto-commit + audit queries
+  scanner.ts             Raw file/directory analysis (no registry needed)
+```
+
 ## Stack
 
 - TypeScript strict, Node.js 18+
@@ -206,7 +239,7 @@ Four audit commands (`history`, `diff`, `snapshot`, `audit`) give full traceabil
 
 ## Current state
 
-**v0.1.5** — Framework-aligned engine with 17 CLI commands, pointer-only DB, three-tier command model (primitive / deterministic composite / agent workflow). FRAMEWORK.md defines the constitution.
+**v0.1.5** — Framework-aligned engine with 17 CLI commands, pointer-only DB, three-tier command model (primitive / deterministic composite / agent workflow). Engine and CLI split into domain modules. FRAMEWORK.md defines the constitution.
 
 ## Roadmap
 
