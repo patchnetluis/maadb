@@ -18,6 +18,17 @@ const FIELD_TYPE_TO_PRIMITIVE: Partial<Record<FieldType, Primitive>> = {
   number: 'quantity',
 };
 
+const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+const PHONE_REGEX = /^[+]?[\d\s().-]{7,}$/;
+const URL_REGEX = /^https?:\/\//;
+
+function detectContactPrimitive(value: string): Primitive | null {
+  if (EMAIL_REGEX.test(value)) return 'contact';
+  if (PHONE_REGEX.test(value)) return 'contact';
+  if (URL_REGEX.test(value)) return 'contact';
+  return null;
+}
+
 export function extractFields(
   bound: BoundDocument,
   schema: SchemaDefinition,
@@ -28,7 +39,12 @@ export function extractFields(
     if (!field.indexed) continue;
     if (field.value === undefined || field.value === null) continue;
 
-    const primitive = FIELD_TYPE_TO_PRIMITIVE[field.fieldType] ?? 'entity';
+    let primitive = FIELD_TYPE_TO_PRIMITIVE[field.fieldType] ?? 'entity';
+    // Detect contact-like string values (email, phone, URL)
+    if (primitive === 'entity' && field.fieldType === 'string') {
+      const contactPrimitive = detectContactPrimitive(String(field.value));
+      if (contactPrimitive) primitive = contactPrimitive;
+    }
     // gray-matter parses date strings as JS Date objects — convert back to ISO
     const valueStr = field.value instanceof Date
       ? field.value.toISOString().slice(0, 10)

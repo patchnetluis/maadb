@@ -24,8 +24,10 @@ export async function readBlockContent(projectRoot: string, doc: DocumentRecord,
   return lines.slice(contentStart, contentEnd).join('\n').trim();
 }
 
-export function generateDocId(prefix: string, fields: Record<string, unknown>): string {
+export function generateDocId(prefix: string, fields: Record<string, unknown>, existingIds?: string[]): string {
   const nameOrTitle = fields['name'] ?? fields['title'];
+
+  // Slug strategy: use name/title if available
   if (typeof nameOrTitle === 'string') {
     const slug = nameOrTitle
       .toLowerCase()
@@ -36,10 +38,23 @@ export function generateDocId(prefix: string, fields: Record<string, unknown>): 
       .slice(0, 40);
     if (slug.length > 0) return `${prefix}-${slug}`;
   }
-  const now = new Date();
-  const stamp = now.toISOString().slice(0, 10);
-  const rand = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-  return `${prefix}-${stamp}-${rand}`;
+
+  // Sequence strategy: prefix-YYYY-NNN
+  const year = new Date().getFullYear();
+  const seqPrefix = `${prefix}-${year}-`;
+  let maxSeq = 0;
+
+  if (existingIds) {
+    for (const id of existingIds) {
+      if (id.startsWith(seqPrefix)) {
+        const seqStr = id.slice(seqPrefix.length);
+        const num = parseInt(seqStr, 10);
+        if (!isNaN(num) && num > maxSeq) maxSeq = num;
+      }
+    }
+  }
+
+  return `${seqPrefix}${String(maxSeq + 1).padStart(3, '0')}`;
 }
 
 export function computeNumericValue(value: unknown, fieldType: string): number | null {

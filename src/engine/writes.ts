@@ -36,7 +36,8 @@ export async function createDocument(
   const schema = ctx.schemaStore.getSchemaForType(dt);
   if (!schema) return singleErr('SCHEMA_NOT_FOUND', `No schema for type "${dt as string}"`);
 
-  const id = customDocId ?? generateDocId(regType.idPrefix, fields);
+  const existingIds = ctx.backend.getSampleDocIds(dt, 10000).map(id => id as string);
+  const id = customDocId ?? generateDocId(regType.idPrefix, fields, existingIds);
 
   if (ctx.backend.getDocument(toDocId(id))) {
     return singleErr('DUPLICATE_DOC_ID', `Document "${id}" already exists`);
