@@ -29,9 +29,32 @@
 
 ---
 
+## In Progress
+
+### Storage Boundary + LLM UX Refactor (v0.1.3)
+
+Two-checkpoint refactor. See detailed plan in ROADMAP-DETAILED.md.
+
+**Checkpoint 1: Pointer-only DB**
+- [ ] Prove block pointer warm reads work (test: file slice at start_line:end_line matches current content)
+- [ ] Drop `frontmatter` from DocumentRecord + SQLite documents table
+- [ ] Drop `content` from ParsedBlock + SQLite blocks table
+- [ ] Add `readFrontmatter()` helper — reads file, parses via gray-matter
+- [ ] Update getDocument, updateDocument, validate, inspect to read from file
+- [ ] All tests green
+
+**Checkpoint 2: LLM UX Layer**
+- [ ] `summary` command — one-call project orientation (types, counts, object inventory, recent activity)
+- [ ] `get <id> full` — resolved record with context (refs resolved, latest note, extracted objects, related records)
+- [ ] `schema <type>` command — field definitions for write operations
+- [ ] Static MAAD.md (remove volatile data, only regenerate if missing)
+- [ ] Concurrency hardening (read-only connection mode)
+
+---
+
 ## Near-Term
 
-### maad-demo (next)
+### maad-demo
 
 Product showcase and template engine demo. Separate repo: `patchnetluis/maad-demo`.
 
