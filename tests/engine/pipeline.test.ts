@@ -165,19 +165,6 @@ describe('listRelated', () => {
   });
 });
 
-describe('inspect', () => {
-  it('returns full engine internals for a document', async () => {
-    const result = await engine.inspect(docId('cas-2026-001'));
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value.docType).toBe('case');
-    expect(result.value.blocks.length).toBeGreaterThanOrEqual(2);
-    expect(result.value.objects.length).toBeGreaterThanOrEqual(3);
-    expect(result.value.relationships.length).toBeGreaterThanOrEqual(2);
-    expect(result.value.validation.valid).toBe(true);
-  });
-});
-
 describe('validate', () => {
   it('validates a single document', async () => {
     const result = await engine.validate(docId('cli-acme'));

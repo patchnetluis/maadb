@@ -1,9 +1,12 @@
 ---
 enabled: true
-current: 0.1.4
+current: 0.1.5
 ---
 
 # Version History
+
+## 0.1.5 — 2026-04-07
+FRAMEWORK.md: data doctrine, three-tier command model (primitive / deterministic composite / agent workflow), engine design principles. New scan command for LLM-native onboarding (file-level structural analysis + corpus-level pattern summary). Removed inspect from engine (documented as agent composition pattern). Marked get full as provisional composite. Added search --doc flag. MAAD.md now regenerated on every reindex. Old FRAMEWORK.md and README-MVP.md archived. 211 tests passing.
 
 ## 0.1.4 — 2026-04-07
 summary is now sync read-only (no indexAll, no git audit). Rebuilt dist to match source. MAAD.md boot contract rewritten — stable instructions, summary for live snapshot, SCHEMA.md for deep reference only. Fixed project description to "Markdown As A Database". Added prepublishOnly build hook. 203 tests passing.

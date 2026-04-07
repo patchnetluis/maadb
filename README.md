@@ -40,12 +40,32 @@ node dist/cli.js --project my-project summary
 node dist/cli.js --project my-project get <doc_id> hot
 ```
 
+### LLM-native onboarding
+
+Drop raw markdown files into a folder and let the LLM bootstrap the project:
+
+```bash
+# Scan a directory — LLM sees what types want to exist
+node dist/cli.js scan ./raw-files/
+
+# LLM reads the scan output, proposes registry + schemas,
+# adds frontmatter to files, then:
+node dist/cli.js --project ./raw-files reindex --force
+```
+
+`scan` works at two levels:
+- **`scan <file.md>`** — detailed structural read of one document (frontmatter, headings, annotations, detected patterns)
+- **`scan <dir/>`** — corpus-level summary (recurring headings, common fields, document families, entity/date/amount aggregation)
+
 ## Commands
 
-### Read
+### Discover
 | Command | What it does |
 |---------|-------------|
+| `scan <file\|dir>` | Analyze raw markdown — no registry needed |
 | `summary` | **Start here.** Types, counts, sample IDs, object inventory |
+
+### Read
 | `describe` | Project overview: types, doc counts, primitives |
 | `get <id> hot` | Frontmatter only (cheapest read) |
 | `get <id> warm <block>` | Frontmatter + one section |
@@ -55,7 +75,6 @@ node dist/cli.js --project my-project get <doc_id> hot
 | `query <type> --filter k=v` | Filtered by indexed field |
 | `search <primitive>` | Cross-document object search |
 | `related <id> both` | Connected documents (outgoing + incoming) |
-| `inspect <id>` | Full engine internals for a document |
 | `schema <type>` | Field definitions for a type |
 
 ### Write
@@ -183,11 +202,11 @@ Four audit commands (`history`, `diff`, `snapshot`, `audit`) give full traceabil
 
 - TypeScript strict, Node.js 18+
 - 3 production dependencies: `better-sqlite3`, `gray-matter`, `simple-git`
-- 203 tests, Vitest
+- 211 tests, Vitest
 
 ## Current state
 
-**v0.1.4** — Functional engine with 17 CLI commands, pointer-only DB, LLM UX layer (summary, get full, schema), static boot contract.
+**v0.1.5** — Framework-aligned engine with 17 CLI commands, pointer-only DB, three-tier command model (primitive / deterministic composite / agent workflow). FRAMEWORK.md defines the constitution.
 
 ## Roadmap
 

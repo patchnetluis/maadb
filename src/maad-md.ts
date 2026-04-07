@@ -1,8 +1,8 @@
 // ============================================================================
 // MAAD.md Generator
 // Generates the LLM instruction file for a MAAD project.
-// This file is STABLE — no volatile counts, no project-state details.
-// It describes how to use the tools, not what's in the project.
+// Content is STABLE — no volatile counts, no project-state details.
+// Regenerated on every reindex so interface changes propagate.
 // ============================================================================
 
 import type { Registry, SchemaStore, BackendStats } from './types.js';
@@ -24,6 +24,7 @@ export function generateMaadMd(ctx: MaadMdContext): string {
   sections.push(generateFullCommandRef(cmd));
   sections.push(generatePrimitives());
   sections.push(generateRules());
+  sections.push(generateCompositionPatterns(cmd));
   sections.push(generateFeedback());
 
   return sections.join('\n\n---\n\n') + '\n';
@@ -90,10 +91,14 @@ That's it. You're oriented. Now use the commands below as needed.
 function generateFullCommandRef(cmd: string): string {
   return `## All Commands
 
-### Read
+### Discover
 | Command | What it does |
 |---------|-------------|
+| \`scan <file.md>\` | Structural analysis of a raw file (no registry needed) |
+| \`scan <dir/>\` | Corpus-level patterns: recurring fields, headings, document families |
 | \`summary\` | **Start here.** Types, counts, sample IDs, object inventory |
+
+### Read
 | \`describe\` | Project overview: types, doc counts, primitives |
 | \`get <doc_id> hot\` | Frontmatter only (cheapest read) |
 | \`get <doc_id> warm <block>\` | Frontmatter + one section |
@@ -107,7 +112,6 @@ function generateFullCommandRef(cmd: string): string {
 | \`related <doc_id> both\` | All connected documents (outgoing + incoming) |
 | \`related <doc_id> outgoing\` | Documents this one references |
 | \`related <doc_id> incoming\` | Documents that reference this one |
-| \`inspect <doc_id>\` | Full engine internals: blocks, objects, relationships, validation |
 | \`schema <type>\` | Field definitions for a type (what to pass to create/update) |
 
 ### Write
@@ -172,6 +176,31 @@ function generateRules(): string {
 6. **Use \`related\` for graph traversal** — don't manually search for connected docs
 7. **Cite \`doc_id\` and \`block_id\`** in answers for traceability
 8. **\`reindex --force\`** recovers from any stale state`;
+}
+
+function generateCompositionPatterns(cmd: string): string {
+  return `## Composition Patterns
+
+These are common multi-step operations built from primitives. The engine does not provide these as single commands — you compose them.
+
+### Deep inspect (full engine internals for a document)
+\`\`\`
+${cmd} get <doc_id> hot          # frontmatter + metadata
+${cmd} validate <doc_id>         # schema validation state
+${cmd} related <doc_id> both     # all relationships
+${cmd} search entity --doc <doc_id>  # all extracted objects
+\`\`\`
+
+### Onboard raw files (bootstrap a new project)
+\`\`\`
+${cmd} scan <directory>           # corpus-level patterns
+# Read the output, then:
+# 1. Create _registry/object_types.yaml with detected families
+# 2. Create _schema/*.yaml with detected field patterns
+# 3. Add frontmatter to each file
+${cmd} reindex --force            # build the index
+${cmd} summary                    # confirm orientation
+\`\`\``;
 }
 
 function generateFeedback(): string {

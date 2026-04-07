@@ -118,19 +118,6 @@ export interface DescribeResult {
   lastIndexedAt: string | null;
 }
 
-export interface InspectResult {
-  docId: DocId;
-  filePath: FilePath;
-  fileHash: string;
-  docType: DocType;
-  schemaRef: SchemaRef;
-  version: number;
-  validation: ValidationResult;
-  blocks: ParsedBlock[];
-  objects: ObjectMatch[];
-  relationships: Relationship[];
-}
-
 export interface SummaryResult {
   types: Array<{
     type: string;
@@ -520,6 +507,9 @@ export class MaadEngine {
     return ok(result);
   }
 
+  // Tier 2 — Deterministic Composite (provisional)
+  // Bundled convenience read: get hot + related + search + resolve refs.
+  // Evaluate after MCP: keep only if it measurably reduces tool chatter.
   async getDocumentFull(id: DocId): Promise<Result<GetFullResult>> {
     this.assertInit();
 
@@ -912,36 +902,6 @@ export class MaadEngine {
       schemaRef: regType.schemaRef as string,
       fields,
       templateHeadings,
-    });
-  }
-
-  async inspect(id: DocId): Promise<Result<InspectResult>> {
-    this.assertInit();
-
-    const doc = this.backend.getDocument(id);
-    if (!doc) return singleErr('FILE_NOT_FOUND', `Document "${id as string}" not found`);
-
-    const frontmatter = await this.readFrontmatter(doc);
-    const schema = this.schemaStore.getSchemaForType(doc.docType);
-    const validation = schema
-      ? validateFrontmatter(frontmatter, schema, this.registry)
-      : { valid: false, errors: [{ field: 'doc_type', message: 'No schema found', location: null }] };
-
-    const blocks = this.backend.getBlocks(id);
-    const objects = this.backend.findObjects({ docId: id, limit: 1000 });
-    const relationships = this.backend.getRelationships(id, 'both');
-
-    return ok({
-      docId: doc.docId,
-      filePath: doc.filePath,
-      fileHash: doc.fileHash,
-      docType: doc.docType,
-      schemaRef: doc.schemaRef,
-      version: doc.version,
-      validation,
-      blocks,
-      objects,
-      relationships,
     });
   }
 

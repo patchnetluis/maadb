@@ -13,6 +13,7 @@ import { GitLayer } from './git/index.js';
 import { docId, docType } from './types.js';
 import { generateMaadMd, generateStubMaadMd } from './maad-md.js';
 import { generateSchemaMd } from './schema-md.js';
+import { scanFile, scanDirectory } from './scanner.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -74,14 +75,14 @@ async function main(): Promise<void> {
     case 'update':
       await cmdUpdate();
       break;
-    case 'inspect':
-      await cmdInspect();
-      break;
     case 'summary':
       await cmdSummary();
       break;
     case 'schema':
       await cmdSchema();
+      break;
+    case 'scan':
+      await cmdScan();
       break;
     case 'serve':
       console.log('MCP server is on the roadmap. Use the engine library or CLI for now.');
@@ -250,19 +251,17 @@ async function cmdReindex(): Promise<void> {
       const stats = engine.getBackend().getStats();
       const enginePath = path.resolve(__dirname, 'cli.js');
 
-      // MAAD.md — only write if it doesn't exist (tool knowledge is stable)
+      // MAAD.md — always regenerate (stable content, but interface changes must propagate)
       const maadMdPath = path.join(engine.getProjectRoot(), 'MAAD.md');
-      if (!existsSync(maadMdPath)) {
-        const maadMd = generateMaadMd({
-          projectRoot: engine.getProjectRoot(),
-          enginePath,
-          registry,
-          schemaStore: schemaResult.value,
-          stats,
-        });
-        writeFileSync(maadMdPath, maadMd, 'utf-8');
-        console.log('Created MAAD.md');
-      }
+      const maadMd = generateMaadMd({
+        projectRoot: engine.getProjectRoot(),
+        enginePath,
+        registry,
+        schemaStore: schemaResult.value,
+        stats,
+      });
+      writeFileSync(maadMdPath, maadMd, 'utf-8');
+      console.log('Updated MAAD.md');
 
       // SCHEMA.md — always regenerate (data knowledge changes with the index)
       const schemaMd = generateSchemaMd({
@@ -365,7 +364,7 @@ async function cmdGet(): Promise<void> {
 async function cmdSearch(): Promise<void> {
   const primitive = args[1];
   if (!primitive) {
-    console.error('Usage: maad search <primitive> [--subtype type] [--value val] [--contains text]');
+    console.error('Usage: maad search <primitive> [--subtype type] [--value val] [--contains text] [--doc doc_id]');
     process.exit(1);
   }
 
@@ -376,6 +375,7 @@ async function cmdSearch(): Promise<void> {
     if (args[i] === '--subtype' && args[i + 1]) { query['subtype'] = args[++i]; }
     if (args[i] === '--value' && args[i + 1]) { query['value'] = args[++i]; }
     if (args[i] === '--contains' && args[i + 1]) { query['contains'] = args[++i]; }
+    if (args[i] === '--doc' && args[i + 1]) { query['docId'] = args[++i]; }
   }
 
   const result = engine.searchObjects(query as any);
@@ -559,25 +559,34 @@ async function cmdUpdate(): Promise<void> {
   engine.close();
 }
 
-async function cmdInspect(): Promise<void> {
-  const id = args[1];
-  if (!id) {
-    console.error('Usage: maad inspect <doc_id>');
+async function cmdScan(): Promise<void> {
+  const target = args[1];
+  if (!target) {
+    console.error('Usage: maad scan <file.md|directory>');
     process.exit(1);
   }
 
-  const engine = await initEngine();
+  const absTarget = path.resolve(target);
+  const { statSync } = await import('node:fs');
 
-  const result = await engine.inspect(docId(id));
-  if (!result.ok) {
-    console.error('Inspect failed:');
-    for (const e of result.errors) console.error(`  ${e.code}: ${e.message}`);
-    engine.close();
+  let stat;
+  try {
+    stat = statSync(absTarget);
+  } catch {
+    console.error(`Not found: ${absTarget}`);
     process.exit(1);
   }
 
-  console.log(JSON.stringify(result.value, null, 2));
-  engine.close();
+  if (stat.isFile()) {
+    const result = await scanFile(absTarget);
+    console.log(JSON.stringify(result, null, 2));
+  } else if (stat.isDirectory()) {
+    const result = await scanDirectory(absTarget);
+    console.log(JSON.stringify(result, null, 2));
+  } else {
+    console.error('Target must be a file or directory');
+    process.exit(1);
+  }
 }
 
 async function cmdSummary(): Promise<void> {
@@ -624,19 +633,19 @@ async function initEngine(): Promise<MaadEngine> {
 
 function printHelp(): void {
   console.log(`
-MAAD — Markdown Augmented Adaptive Database
+MAAD — Markdown As A Database
 
 Usage: maad <command> [options]
 
 Commands:
   init [dir]                        Initialize a new MAAD project
+  scan <file.md|dir>                 Analyze raw markdown (no registry needed)
   summary                           Project snapshot (types, counts, sample IDs, object inventory)
   describe                          Show project overview
   get <doc_id> [depth] [block]      Read a document (hot/warm/cold/full)
   query <type> [--filter k=v]       Find documents by type and filters
-  search <primitive> [--subtype s]  Search extracted objects
+  search <primitive> [opts]         Search extracted objects (--subtype, --value, --contains, --doc)
   related <doc_id> [direction]      Show related documents
-  inspect <doc_id>                  Show full engine internals for a document
   schema <type>                     Show field definitions for a type (for writes)
   create <type> --field k=v [...]   Create a new document
   update <doc_id> --field k=v [...] Update a document's fields or body
