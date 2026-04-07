@@ -1,0 +1,146 @@
+// ============================================================================
+// MAAD Engine — Thin facade over domain modules
+// Holds state, delegates to domain functions via EngineContext.
+// ============================================================================
+
+import { existsSync, mkdirSync } from 'node:fs';
+import path from 'node:path';
+
+import { ok, type Result } from '../errors.js';
+import type {
+  DocId,
+  DocType,
+  FilePath,
+  Registry,
+  SchemaStore,
+  SchemaDefinition,
+  ExtractionResult,
+} from '../types.js';
+import { loadRegistry } from '../registry/index.js';
+import { loadSchemas } from '../schema/index.js';
+import { SqliteBackend } from '../backend/index.js';
+import type { MaadBackend } from '../backend/index.js';
+import { GitLayer } from '../git/index.js';
+import type { EngineContext } from './context.js';
+
+// Domain modules
+import * as indexing from './indexing.js';
+import * as reads from './reads.js';
+import * as composites from './composites.js';
+import * as writes from './writes.js';
+import * as maintenance from './maintenance.js';
+import * as auditOps from './audit.js';
+
+// Re-export all result types
+export type {
+  IndexResult,
+  CreateResult,
+  GetResult,
+  UpdateResult,
+  DeleteResult,
+  FindResult,
+  SearchResult,
+  RelatedResult,
+  DescribeResult,
+  SummaryResult,
+  GetFullResult,
+  SchemaInfoResult,
+  ValidationReport,
+} from './types.js';
+
+export class MaadEngine {
+  private projectRoot: string = '';
+  private registry!: Registry;
+  private schemaStore!: SchemaStore;
+  private backend!: MaadBackend;
+  private gitLayer: GitLayer | null = null;
+  private initialized = false;
+
+  async init(projectRoot: string): Promise<Result<void>> {
+    this.projectRoot = path.resolve(projectRoot);
+
+    const regResult = await loadRegistry(this.projectRoot);
+    if (!regResult.ok) return regResult;
+    this.registry = regResult.value;
+
+    const schemaResult = await loadSchemas(this.projectRoot, this.registry);
+    if (!schemaResult.ok) return schemaResult;
+    this.schemaStore = schemaResult.value;
+
+    const backendDir = path.join(this.projectRoot, '_backend');
+    if (!existsSync(backendDir)) mkdirSync(backendDir, { recursive: true });
+
+    const dbPath = path.join(backendDir, 'maad.db');
+    this.backend = new SqliteBackend(dbPath);
+    this.backend.init();
+
+    this.gitLayer = new GitLayer(this.projectRoot);
+    if (await this.gitLayer.isRepo()) {
+      // Git is available
+    } else {
+      this.gitLayer = null;
+    }
+
+    this.initialized = true;
+    return ok(undefined);
+  }
+
+  close(): void {
+    if (this.backend) this.backend.close();
+  }
+
+  private ctx(): EngineContext {
+    this.assertInit();
+    return {
+      projectRoot: this.projectRoot,
+      registry: this.registry,
+      schemaStore: this.schemaStore,
+      backend: this.backend,
+      gitLayer: this.gitLayer,
+    };
+  }
+
+  private assertInit(): void {
+    if (!this.initialized) {
+      throw new Error('MaadEngine not initialized. Call init() first.');
+    }
+  }
+
+  // --- Indexing ---
+  async indexAll(opts?: { force?: boolean }) { return indexing.indexAll(this.ctx(), opts); }
+  async indexFile(absolutePath: FilePath) { return indexing.indexFile(this.ctx(), absolutePath); }
+  async reindex(opts?: { docId?: DocId; force?: boolean }) { return indexing.reindex(this.ctx(), opts); }
+
+  // --- Reads ---
+  async getDocument(id: DocId, depth: 'hot' | 'warm' | 'cold', blockIdOrHeading?: string) { return reads.getDocument(this.ctx(), id, depth, blockIdOrHeading); }
+  findDocuments(query: import('../types.js').DocumentQuery) { return reads.findDocuments(this.ctx(), query); }
+  searchObjects(query: import('../types.js').ObjectQuery) { return reads.searchObjects(this.ctx(), query); }
+  listRelated(id: DocId, direction: 'outgoing' | 'incoming' | 'both', types?: DocType[]) { return reads.listRelated(this.ctx(), id, direction, types); }
+  describe() { return reads.describe(this.ctx()); }
+  summary() { return reads.summary(this.ctx()); }
+  getSchema(dt: DocType) { return reads.getSchema(this.ctx(), dt); }
+  schemaInfo(dt: DocType) { return reads.schemaInfo(this.ctx(), dt); }
+
+  // --- Composites (Tier 2, provisional) ---
+  async getDocumentFull(id: DocId) { return composites.getDocumentFull(this.ctx(), id); }
+
+  // --- Writes ---
+  async createDocument(dt: DocType, fields: Record<string, unknown>, body?: string, customDocId?: string) { return writes.createDocument(this.ctx(), dt, fields, body, customDocId); }
+  async updateDocument(id: DocId, fields?: Record<string, unknown>, body?: string, appendBody?: string, expectedVersion?: number) { return writes.updateDocument(this.ctx(), id, fields, body, appendBody, expectedVersion); }
+  async deleteDocument(id: DocId, mode: 'soft' | 'hard') { return writes.deleteDocument(this.ctx(), id, mode); }
+
+  // --- Maintenance ---
+  async validate(docId?: DocId) { return maintenance.validate(this.ctx(), docId); }
+
+  // --- Audit ---
+  async history(id: DocId, opts?: { limit?: number; since?: string }) { return auditOps.history(this.ctx(), id, opts); }
+  async diff(id: DocId, from: string, to?: string) { return auditOps.diff(this.ctx(), id, from, to); }
+  async snapshot(id: DocId, at: string) { return auditOps.snapshot(this.ctx(), id, at); }
+  async audit(opts?: { since?: string; until?: string; docType?: DocType }) { return auditOps.audit(this.ctx(), opts); }
+
+  // --- Accessors ---
+  getBackend(): MaadBackend { return this.backend; }
+  getRegistry(): Registry { return this.registry; }
+  getGitLayer(): GitLayer | null { return this.gitLayer; }
+  getProjectRoot(): string { return this.projectRoot; }
+}
