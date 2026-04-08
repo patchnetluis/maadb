@@ -37,7 +37,9 @@ Initial engine build. Parser, registry, schema, extractor (11 primitives), SQLit
 
 ## Planned
 
-- **0.2.0** — MCP server: 15 LLM tools via stdio transport (minor, new capability)
-- **0.3.0** — Reverse import tooling: CSV/JSON/SQL converters (minor, new capability)
-- **0.4.0** — Query enhancements: FTS5, compound filters, aggregations (minor, new capability)
-- **1.0.0** — First stable release: API locked, npm published, documentation complete (major, stability declaration)
+- **0.3.0** — Real LLM evaluation: MCP end-to-end testing, maadb-demo seed data, benchmark execution (MAAD vs Direct)
+- **0.4.0** — Object attributes: user-defined tags on extracted objects, stored as YAML, indexed on reindex
+- **0.5.0** — Reverse import tooling: CSV/JSON/SQL converters into markdown records
+- **0.6.0** — Query enhancements: FTS5, compound filters, aggregations
+- **0.7.0** — Connector gates: OAuth refresh, scope minimization, cursor persistence (required before any external API)
+- **1.0.0** — Stable release: API locked, npm published, documentation complete

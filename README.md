@@ -182,15 +182,18 @@ All tools return `{ ok: true, data: {...} }` or `{ ok: false, errors: [...] }`.
 
 ## Current state
 
-**v0.2.0** — MCP server with 15 tools, role-based access (reader/writer/admin), stdio transport. Framework-aligned engine with 17 CLI commands, pointer-only DB, three-tier command model.
+**v0.2.3** — Production-hardened engine: durable writes, path security, structured logging, AI guardrails (dry-run, allowlists), batch queries, real pagination. MCP server with 15 tools, role-based access. 236 tests.
 
 ## Roadmap
 
 | Version | What |
 |---------|------|
-| ~~0.2.0~~ | ~~MCP server~~ — **shipped** |
-| 0.3.0 | Reverse import — CSV/JSON/SQL into markdown |
-| 0.4.0 | Query enhancements — FTS5, compound filters |
+| ~~0.2.x~~ | ~~MCP server + production hardening~~ — **shipped** |
+| 0.3.0 | Real LLM evaluation — MCP end-to-end, demo project, benchmark |
+| 0.4.0 | Object attributes — user-defined tags on objects, YAML-stored |
+| 0.5.0 | Reverse import — CSV/JSON/SQL into markdown |
+| 0.6.0 | Query enhancements — FTS5, compound filters |
+| 0.7.0 | Connector gates — OAuth, scopes, cursors (before any external API) |
 | 1.0.0 | Stable release — API locked, npm published |
 
 ## License
