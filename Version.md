@@ -1,9 +1,12 @@
 ---
 enabled: true
-current: 0.2.1
+current: 0.2.2
 ---
 
 # Version History
+
+## 0.2.2 — 2026-04-07
+Production hardening Phase B: 25 MCP boundary tests (role gating, response contracts, path containment, guardrails, health/read-only). Service separation — extracted config.ts, lifecycle.ts from server.ts. 236 tests passing.
 
 ## 0.2.1 — 2026-04-07
 Production hardening Phase A: durable write pipeline (atomic writes, operation journal, startup reconciliation), canonicalized path containment checks, structured error policy with severity logging (no more silent catches), health reporting + read-only mode, AI guardrails (dry-run, tool allowlists, audit logging), release checklist. MAAD-TOOLS.md archived. 211 tests passing.

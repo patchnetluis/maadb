@@ -1,14 +1,14 @@
 // ============================================================================
-// MCP Server — lifecycle, role-based tool registration, stdio transport
+// MCP Server — transport setup and tool registration
+// Lifecycle, config, and guardrails are extracted into separate modules.
 // ============================================================================
 
-import path from 'node:path';
-import { existsSync } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { MaadEngine } from '../engine.js';
-import { parseRole } from './roles.js';
+import { buildConfig, type McpConfig } from './config.js';
 import { setGuardrailConfig } from './guardrails.js';
+import { startupEngine, registerShutdownHooks } from './lifecycle.js';
+import { logger } from '../engine/logger.js';
 import * as discoverTools from './tools/discover.js';
 import * as readTools from './tools/read.js';
 import * as writeTools from './tools/write.js';
@@ -23,80 +23,53 @@ export interface ServeOptions {
 }
 
 export async function startServer(opts: ServeOptions): Promise<void> {
-  const projectRoot = path.resolve(opts.projectRoot);
-  const role = parseRole(opts.role);
+  const config = buildConfig(opts);
 
-  // Validate project exists
-  if (!existsSync(projectRoot)) {
-    console.error(`MAAD MCP: Project directory not found: ${projectRoot}`);
+  // Startup engine with validation
+  let startup;
+  try {
+    startup = await startupEngine(config.projectRoot);
+  } catch (e) {
+    console.error(`MAAD MCP: ${e instanceof Error ? e.message : String(e)}`);
     process.exit(1);
   }
 
-  const registryPath = path.join(projectRoot, '_registry', 'object_types.yaml');
-  if (!existsSync(registryPath)) {
-    console.error(`MAAD MCP: No _registry/object_types.yaml found in ${projectRoot}`);
-    process.exit(1);
-  }
-
-  // Init engine
-  const engine = new MaadEngine();
-  const initResult = await engine.init(projectRoot);
-  if (!initResult.ok) {
-    console.error('MAAD MCP: Engine initialization failed:');
-    for (const e of initResult.errors) console.error(`  ${e.code}: ${e.message}`);
-    process.exit(1);
-  }
+  const { engine } = startup;
 
   // Set guardrail config
-  setGuardrailConfig({ dryRun: opts.dryRun, toolAllowlist: opts.toolAllowlist });
-
-  console.error(`MAAD MCP: Engine initialized for ${projectRoot} (role: ${role}${opts.dryRun ? ', dry-run' : ''})`);
+  setGuardrailConfig({ dryRun: config.dryRun, toolAllowlist: config.toolAllowlist });
 
   // Create MCP server
   const server = new McpServer({
     name: 'maad',
-    version: '0.2.0',
+    version: '0.2.1',
   });
 
   // Register tools by role tier
-  // reader: discover + read + audit (10 tools)
-  // writer: + write (13 tools)
-  // admin:  + maintain (15 tools)
   let toolCount = 0;
 
-  // Reader tier — always registered
-  discoverTools.register(server, engine, projectRoot);
+  discoverTools.register(server, engine, config.projectRoot);
   readTools.register(server, engine);
   auditTools.register(server, engine);
   toolCount = 10;
 
-  // Writer tier
-  if (role === 'writer' || role === 'admin') {
+  if (config.role === 'writer' || config.role === 'admin') {
     writeTools.register(server, engine);
     toolCount = 13;
   }
 
-  // Admin tier
-  if (role === 'admin') {
+  if (config.role === 'admin') {
     maintainTools.register(server, engine);
     toolCount = 15;
   }
 
-  console.error(`MAAD MCP: ${toolCount} tools registered for role '${role}'`);
+  logger.info('mcp', 'startup', `${toolCount} tools registered for role '${config.role}'${config.dryRun ? ' (dry-run)' : ''}`);
 
   // Shutdown hooks
-  const shutdown = async () => {
-    console.error('MAAD MCP: Shutting down...');
-    engine.close();
-    await server.close();
-    process.exit(0);
-  };
-
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  registerShutdownHooks(engine, () => server.close());
 
   // Start stdio transport
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('MAAD MCP: Server started on stdio');
+  logger.info('mcp', 'startup', 'Server started on stdio');
 }
