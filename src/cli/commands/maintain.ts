@@ -10,6 +10,7 @@ import { generateMaadMd, generateStubMaadMd } from '../../maad-md.js';
 import { generateSchemaMd } from '../../schema-md.js';
 import { generateClaudeMd } from '../../claude-md.js';
 import { generateSchemaGuide, generateImportGuide } from '../../skill-files.js';
+import { generateArchitectSkill } from '../../architect.js';
 import type { CliContext } from '../helpers.js';
 import { initEngine } from '../helpers.js';
 
@@ -68,6 +69,12 @@ export async function cmdInit(ctx: CliContext): Promise<void> {
   if (!existsSync(importGuidePath)) {
     writeFileSync(importGuidePath, generateImportGuide(), 'utf-8');
     console.log('  Created _skills/import-guide.md');
+  }
+
+  const architectPath = path.join(skillDir, 'architect-core.md');
+  if (!existsSync(architectPath)) {
+    writeFileSync(architectPath, generateArchitectSkill(), 'utf-8');
+    console.log('  Created _skills/architect-core.md');
   }
 
   const git = new GitLayer(root);

@@ -15,10 +15,24 @@ This is a MAAD project. You have MCP tools for all data operations.
 ## Boot sequence
 
 1. Run \`maad.summary\` to see what's in this project
-2. Use \`maad.schema <type>\` to understand record structure before writing
-3. Use \`maad.health\` if something seems wrong
+2. If summary shows **zero types and zero documents** → this is an empty project. Read \`_skills/architect-core.md\` and enter Architect mode to design and deploy the database.
+3. If summary shows existing types and documents → this is a live project. Proceed with normal operations below.
+4. Use \`maad.schema <type>\` to understand record structure before writing
+5. Use \`maad.health\` if something seems wrong
 
-## Reading data
+## Empty project → Architect mode
+
+When this project has no types defined:
+1. Read \`_skills/architect-core.md\` for the full Architect role specification
+2. Read \`_skills/schema-guide.md\` for field type reference
+3. Read \`_skills/import-guide.md\` if importing existing data
+4. Follow the Architect workflow: discover requirements → design schema → present plan → build
+
+The Architect role handles: schema design, registry creation, data import, troubleshooting, and handoff to normal operations.
+
+## Live project → User mode
+
+### Reading data
 
 - \`maad.summary\` — project snapshot (start here)
 - \`maad.get\` — read a record (hot/warm/cold/full)
@@ -26,25 +40,26 @@ This is a MAAD project. You have MCP tools for all data operations.
 - \`maad.search\` — find extracted objects across all records
 - \`maad.related\` — traverse relationships between records
 
-## Writing data
+### Writing data
 
 - **Always** call \`maad.schema <type>\` before creating or updating records
 - \`maad.create\` — new record (engine validates against schema)
 - \`maad.update\` — modify fields or body (use expectedVersion for safe writes)
+- **Execute writes sequentially** — do not parallelize write operations
 
-## Importing raw data
+### Importing raw data
 
 When onboarding new data into this project:
 
 1. Read the raw files to understand the data
-2. Design the registry (\`_registry/object_types.yaml\`) and schemas (\`_schema/*.yaml\`)
-3. Call \`maad.reload\` to pick up the new registry and schemas
-4. Create individual records using \`maad.create\` for each record
-5. Every record needs frontmatter: \`doc_id\`, \`doc_type\`, \`schema\`, plus fields matching the schema
+2. Read \`_skills/architect-core.md\` for schema design guidance
+3. Design the registry and schemas
+4. Call \`maad.reload\` to pick up the new registry and schemas
+5. Create records using \`maad.create\` (master) or \`maad.update --append\` (transaction)
 6. Call \`maad.reindex\` after bulk creation
 7. Call \`maad.summary\` to confirm
 
-## Frontmatter format
+### Frontmatter format
 
 Every markdown record must have a YAML frontmatter header:
 
@@ -58,31 +73,7 @@ field2: value2
 ---
 \`\`\`
 
-- \`doc_id\`: unique identifier (auto-generated if omitted in create)
-- \`doc_type\`: must match a type in \`_registry/object_types.yaml\`
-- \`schema\`: must match a schema file in \`_schema/\`
-- Additional fields must match the schema definition
-
-## Schema format
-
-Schema files in \`_schema/\` define field types:
-
-\`\`\`yaml
-type: <type_name>
-required:
-  - doc_id
-  - <field>
-fields:
-  <field_name>:
-    type: string | number | date | enum | ref | boolean | list | amount
-    index: true | false
-    values: [val1, val2]  # for enums
-    target: <type>        # for refs
-\`\`\`
-
-Call \`maad.schema <type>\` to see the resolved field definitions.
-
-## Server management
+### Server management
 
 - \`maad.reload\` — reload registry and schemas after config changes (no restart needed)
 - \`maad.health\` — check engine status
@@ -93,6 +84,8 @@ Call \`maad.schema <type>\` to see the resolved field definitions.
 1. MCP tools only — no bash for data operations
 2. Schema first — call \`maad.schema\` before writes
 3. Reload after config changes — call \`maad.reload\` after editing registry or schemas
-4. Report errors — if a tool returns \`ok: false\`, tell the user what happened
+4. Sequential writes — never parallelize create/update/delete operations
+5. Report errors — if a tool returns \`ok: false\`, report what happened
+6. Empty project = Architect mode — read the skill files and design the database
 `;
 }
