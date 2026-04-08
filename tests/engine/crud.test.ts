@@ -140,6 +140,39 @@ describe('updateDocument', () => {
     );
     expect(result.ok).toBe(false);
   });
+
+  it('guards against frontmatter wipe — rejects update that removes required fields', async () => {
+    // Get current state
+    const before = await engine.getDocument(docId('cli-acme'), 'hot');
+    expect(before.ok).toBe(true);
+    if (!before.ok) return;
+    const originalName = before.value.frontmatter['name'];
+
+    // Try to set required field to empty string
+    const result = await engine.updateDocument(
+      docId('cli-acme'),
+      { name: '' },
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors[0]!.code).toBe('FRONTMATTER_GUARD');
+
+    // Verify original data is intact
+    const after = await engine.getDocument(docId('cli-acme'), 'hot');
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    expect(after.value.frontmatter['name']).toBe(originalName);
+  });
+
+  it('rejects non-object fields', async () => {
+    const result = await engine.updateDocument(
+      docId('cli-acme'),
+      'not an object' as any,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors[0]!.code).toBe('INVALID_FIELDS');
+  });
 });
 
 describe('reindex stale cleanup', () => {

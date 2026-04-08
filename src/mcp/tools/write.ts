@@ -6,35 +6,47 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { MaadEngine } from '../../engine.js';
 import { docId, docType } from '../../types.js';
-import { resultToResponse } from '../response.js';
+import { resultToResponse, errorResponse } from '../response.js';
 import { isDryRun, dryRunResponse, auditToolCall } from '../guardrails.js';
+
+function parseFields(raw: unknown): Record<string, unknown> | null {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw === 'string') {
+    try { const parsed = JSON.parse(raw); return typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null; }
+    catch { return null; }
+  }
+  if (typeof raw === 'object' && !Array.isArray(raw)) return raw as Record<string, unknown>;
+  return null;
+}
 
 export function register(server: McpServer, engine: MaadEngine): void {
   server.registerTool('maad.create', {
-    description: 'Creates a new markdown record. Schema-validated. Auto-commits to git. Returns the new docId, filePath, and version.',
+    description: 'Creates a new markdown record. Schema-validated. Auto-commits to git. Returns the new docId, filePath, and version. Pass fields as an object: { name: "Acme", status: "active" }',
     inputSchema: z.object({
       docType: z.string().describe('Document type to create'),
-      fields: z.any().describe('Frontmatter fields (name, status, etc.)'),
+      fields: z.any().describe('Frontmatter fields as object: { name: "Acme", status: "active" }'),
       body: z.string().optional().describe('Markdown body content'),
       docId: z.string().optional().describe('Custom doc_id (auto-generated if omitted)'),
     }),
   }, async (args) => {
     auditToolCall('maad.create', args);
     if (isDryRun()) return dryRunResponse('maad.create', args);
+    const fields = parseFields(args.fields);
+    if (!fields) return errorResponse([{ code: 'INVALID_FIELDS', message: 'fields must be a JSON object, not a string or array' } as any]);
     const result = await engine.createDocument(
       docType(args.docType),
-      args.fields as Record<string, unknown>,
+      fields,
       args.body ?? undefined,
       args.docId ?? undefined,
     );
-    return resultToResponse(result);
+    return resultToResponse(result, 'maad.create');
   });
 
   server.registerTool('maad.update', {
     description: 'Updates a record\'s fields or body. Pass expectedVersion from a prior get to detect concurrent modifications.',
     inputSchema: z.object({
       docId: z.string().describe('Document ID to update'),
-      fields: z.any().optional().describe('Frontmatter fields to update'),
+      fields: z.any().optional().describe('Frontmatter fields to update as object: { status: "closed" }'),
       body: z.string().optional().describe('Replace entire body'),
       appendBody: z.string().optional().describe('Append to existing body'),
       expectedVersion: z.number().optional().describe('Version from prior get — rejects if document has changed'),
@@ -42,14 +54,16 @@ export function register(server: McpServer, engine: MaadEngine): void {
   }, async (args) => {
     auditToolCall('maad.update', args);
     if (isDryRun()) return dryRunResponse('maad.update', args);
+    const fields = args.fields !== undefined ? parseFields(args.fields) : undefined;
+    if (args.fields !== undefined && !fields) return errorResponse([{ code: 'INVALID_FIELDS', message: 'fields must be a JSON object, not a string or array' } as any]);
     const result = await engine.updateDocument(
       docId(args.docId),
-      args.fields as Record<string, unknown> | undefined ?? undefined,
+      fields ?? undefined,
       args.body ?? undefined,
       args.appendBody ?? undefined,
       args.expectedVersion ?? undefined,
     );
-    return resultToResponse(result);
+    return resultToResponse(result, 'maad.update');
   });
 
   server.registerTool('maad.validate', {

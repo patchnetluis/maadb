@@ -132,11 +132,28 @@ export async function updateDocument(
   const changedFields: string[] = [];
   const updatedFm = { ...currentFm };
   if (fields) {
+    // Guard: reject non-object fields that survived past the MCP layer
+    if (typeof fields !== 'object' || Array.isArray(fields)) {
+      return singleErr('INVALID_FIELDS', 'fields must be a plain object, not a string or array');
+    }
     for (const [key, value] of Object.entries(fields)) {
       if (updatedFm[key] !== value) {
         changedFields.push(key);
         updatedFm[key] = value;
       }
+    }
+  }
+
+  // Safety: ensure core fields were not stripped or corrupted
+  const coreFields = ['doc_id', 'doc_type', 'schema'];
+  for (const cf of coreFields) {
+    if (currentFm[cf] !== undefined && (updatedFm[cf] === undefined || updatedFm[cf] === '')) {
+      return singleErr('FRONTMATTER_GUARD', `Update would remove core field "${cf}" — aborting to prevent data loss`);
+    }
+  }
+  for (const req of schema.required) {
+    if (currentFm[req] !== undefined && (updatedFm[req] === undefined || updatedFm[req] === '')) {
+      return singleErr('FRONTMATTER_GUARD', `Update would remove required field "${req}" — aborting to prevent data loss`);
     }
   }
 

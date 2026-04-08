@@ -1,9 +1,12 @@
 ---
 enabled: true
-current: 0.2.6
+current: 0.2.7
 ---
 
 # Version History
+
+## 0.2.7 — 2026-04-08
+Critical: frontmatter guard prevents updates from wiping required fields — aborts before write if any required field would be removed. Write safety: parseFields() at MCP layer handles string-serialized fields, engine rejects non-object fields. Audit fix: date-only --since now inclusive of the specified day (appends T00:00:00). 266 tests passing.
 
 ## 0.2.6 — 2026-04-08
 Filter shorthand: ref fields (and any field) can be filtered with plain string values instead of requiring `{ op: 'eq', value: '...' }`. Aggregate totalMetric: grand total of the metric across all groups returned automatically. 264 tests passing.

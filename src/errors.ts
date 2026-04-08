@@ -27,7 +27,9 @@ export type ErrorCode =
   | 'WRITE_ERROR'
   | 'DELETE_ERROR'
   | 'READ_ONLY'
-  | 'PATH_OUTSIDE_PROJECT';
+  | 'PATH_OUTSIDE_PROJECT'
+  | 'INVALID_FIELDS'
+  | 'FRONTMATTER_GUARD';
 
 export interface MaadError {
   code: ErrorCode;

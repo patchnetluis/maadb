@@ -16,6 +16,13 @@ import {
   type AuditEntry,
 } from '../types.js';
 
+// Git --since="2026-04-08" excludes commits from that day.
+// Appending T00:00:00 makes it inclusive of the specified date.
+function normalizeDateArg(value: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return `${value}T00:00:00`;
+  return value;
+}
+
 export async function getHistory(
   git: SimpleGit,
   filePath: string,
@@ -24,7 +31,7 @@ export async function getHistory(
   const args = ['--follow', '--format=%H|%an|%aI|%s'];
 
   if (opts?.limit) args.push(`-n`, String(opts.limit));
-  if (opts?.since) args.push(`--since=${opts.since}`);
+  if (opts?.since) args.push(`--since=${normalizeDateArg(opts.since)}`);
 
   args.push('--', filePath);
 
@@ -72,8 +79,8 @@ export async function getAudit(
 ): Promise<AuditEntry[]> {
   const args = ['--format=%H|%an|%aI|%s'];
 
-  if (opts?.since) args.push(`--since=${opts.since}`);
-  if (opts?.until) args.push(`--until=${opts.until}`);
+  if (opts?.since) args.push(`--since=${normalizeDateArg(opts.since)}`);
+  if (opts?.until) args.push(`--until=${normalizeDateArg(opts.until)}`);
 
   let logOutput: string;
   try {
