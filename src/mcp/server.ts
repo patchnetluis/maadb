@@ -60,7 +60,7 @@ export async function startServer(opts: ServeOptions): Promise<void> {
 
   if (config.role === 'admin') {
     maintainTools.register(server, engine);
-    toolCount = 15;
+    toolCount = 17;
   }
 
   logger.info('mcp', 'startup', `${toolCount} tools registered for role '${config.role}'${config.dryRun ? ' (dry-run)' : ''}`);

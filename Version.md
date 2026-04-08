@@ -1,9 +1,12 @@
 ---
 enabled: true
-current: 0.2.3
+current: 0.2.4
 ---
 
 # Version History
+
+## 0.2.4 — 2026-04-07
+MCP server stability: auto-create missing type directories, maad.reload (re-init engine mid-session), maad.health (engine status). CLAUDE.md generated on init with MCP-first agent instructions. MAAD.md updated with MCP-first language. Skill files: _skills/schema-guide.md and _skills/import-guide.md generated on init. 17 admin tools, 13 writer, 10 reader. 236 tests passing.
 
 ## 0.2.3 — 2026-04-07
 Production hardening Phase C: batch doc lookups (getDocumentsByIds eliminates N+1 in listRelated and getDocumentFull), real pagination (countDocuments/countObjects — total means total matches not page size), DRY query builders in SQLite backend. 236 tests passing.

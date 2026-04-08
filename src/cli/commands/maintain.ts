@@ -8,6 +8,8 @@ import { docId } from '../../types.js';
 import { GitLayer } from '../../git/index.js';
 import { generateMaadMd, generateStubMaadMd } from '../../maad-md.js';
 import { generateSchemaMd } from '../../schema-md.js';
+import { generateClaudeMd } from '../../claude-md.js';
+import { generateSchemaGuide, generateImportGuide } from '../../skill-files.js';
 import type { CliContext } from '../helpers.js';
 import { initEngine } from '../helpers.js';
 
@@ -45,17 +47,36 @@ export async function cmdInit(ctx: CliContext): Promise<void> {
     console.log('  Created MAAD.md');
   }
 
+  // CLAUDE.md — agent instructions for MCP-first workflow
+  const claudeMdPath = path.join(root, 'CLAUDE.md');
+  if (!existsSync(claudeMdPath)) {
+    writeFileSync(claudeMdPath, generateClaudeMd(), 'utf-8');
+    console.log('  Created CLAUDE.md');
+  }
+
+  // Skill files — detailed workflow guides
+  const skillDir = path.join(root, '_skills');
+  if (!existsSync(skillDir)) mkdirSync(skillDir, { recursive: true });
+
+  const schemaGuidePath = path.join(skillDir, 'schema-guide.md');
+  if (!existsSync(schemaGuidePath)) {
+    writeFileSync(schemaGuidePath, generateSchemaGuide(), 'utf-8');
+    console.log('  Created _skills/schema-guide.md');
+  }
+
+  const importGuidePath = path.join(skillDir, 'import-guide.md');
+  if (!existsSync(importGuidePath)) {
+    writeFileSync(importGuidePath, generateImportGuide(), 'utf-8');
+    console.log('  Created _skills/import-guide.md');
+  }
+
   const git = new GitLayer(root);
   if (!(await git.isRepo())) {
     await git.initRepo();
     console.log('  Initialized git repository');
   }
 
-  console.log('\nDone. Next steps:');
-  console.log('  1. Define types in _registry/object_types.yaml');
-  console.log('  2. Create schemas in _schema/');
-  console.log('  3. Add markdown records');
-  console.log('  4. Run: maad reindex');
+  console.log('\nDone. The LLM agent can now use MAAD MCP tools to work with this project.');
 }
 
 export async function cmdValidate(ctx: CliContext): Promise<void> {

@@ -4,7 +4,7 @@
 // ============================================================================
 
 import { readFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import matter from 'gray-matter';
 import { ok, err, singleErr, maadError, type Result } from '../errors.js';
@@ -92,7 +92,7 @@ export async function loadRegistry(projectRoot: string): Promise<Result<Registry
       continue;
     }
     if (!existsSync(resolvedPath)) {
-      errors.push(maadError('REGISTRY_INVALID', `Type "${name}" path does not exist: ${typePath}`));
+      mkdirSync(resolvedPath, { recursive: true });
     }
 
     // Validate id_prefix

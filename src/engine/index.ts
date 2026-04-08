@@ -116,6 +116,12 @@ export class MaadEngine {
     return this._readOnly;
   }
 
+  async reload(): Promise<Result<void>> {
+    if (this.backend) this.backend.close();
+    this.initialized = false;
+    return this.init(this.projectRoot, { readOnly: this._readOnly });
+  }
+
   health(): HealthReport {
     this.assertInit();
     const stats = this.backend.getStats();

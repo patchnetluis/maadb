@@ -21,11 +21,13 @@ describe('MCP roles', () => {
     expect(tools.has('maad.reindex')).toBe(false);
   });
 
-  it('admin gets 15 tools (all)', () => {
+  it('admin gets 17 tools (all)', () => {
     const tools = getToolsForRole('admin');
-    expect(tools.size).toBe(15);
+    expect(tools.size).toBe(17);
     expect(tools.has('maad.delete')).toBe(true);
     expect(tools.has('maad.reindex')).toBe(true);
+    expect(tools.has('maad.reload')).toBe(true);
+    expect(tools.has('maad.health')).toBe(true);
   });
 
   it('parseRole defaults to reader for invalid input', () => {

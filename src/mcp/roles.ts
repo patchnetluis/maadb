@@ -17,7 +17,7 @@ const WRITER_TOOLS = [
 
 const ADMIN_TOOLS = [
   ...WRITER_TOOLS,
-  'maad.delete', 'maad.reindex',
+  'maad.delete', 'maad.reindex', 'maad.reload', 'maad.health',
 ] as const;
 
 const ROLE_TOOLS: Record<Role, readonly string[]> = {

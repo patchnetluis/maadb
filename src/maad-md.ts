@@ -49,16 +49,17 @@ function generateHeader(cmd: string): string {
 A **MAAD project** — a markdown-native database. Markdown files are the records. A queryable index gives you structured access without reading full files.
 
 **This file** = stable operating instructions. Read once per session.
-**\`summary\` command** = live project snapshot. Run once per session to see what's here.
-**SCHEMA.md** = deep structural reference. Read only when you need field-level detail.
+**\`maad.summary\` tool** = live project snapshot. Run once per session to see what's here.
+**SCHEMA.md** = deep structural reference. Read only when \`maad.schema\` isn't enough.
 
-## How to run commands
+## How to access data
 
+Use **MAAD MCP tools** for all data operations. Do not use shell commands or direct file reads for data access. See CLAUDE.md for detailed agent workflow instructions.
+
+If using CLI for debugging:
 \`\`\`
 ${cmd} <command> [args]
-\`\`\`
-
-All output is JSON unless noted.`;
+\`\`\``;
 }
 
 function generateQuickStart(cmd: string, _ctx: MaadMdContext): string {
