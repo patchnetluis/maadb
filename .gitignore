@@ -1,6 +1,8 @@
 node_modules/
 dist/
 _backend/
+.claude/
+MAAD.md
 
 # Test temp directories
 tests/fixtures/_temp-*/
