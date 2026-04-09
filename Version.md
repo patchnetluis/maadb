@@ -1,9 +1,12 @@
 ---
 enabled: true
-current: 0.2.9
+current: 0.2.10
 ---
 
 # Version History
+
+## 0.2.10 — 2026-04-09
+Read-back verification on bulk_create and bulk_update. Deterministic sampling (all ≤20, evenly spaced 10 for larger). Canonical value comparison (dates, arrays, booleans). Verifies frontmatter, body content, and field_index integrity. Returns sampledIds for auditability. 266 tests passing.
 
 ## 0.2.9 — 2026-04-09
 Summary warnings (brokenRefs, validationErrors), business-friendly validation messages with field expectations, bulk_update batched into single git commit. 266 tests passing.
