@@ -38,7 +38,21 @@ The engine recognizes 11 built-in primitives for inline annotation extraction (`
 | `contact` | Email, phone | `[[contact:jane@acme.com\|email]]` |
 | `media` | File references, URLs | `[[media:report.pdf\|attachment]]` |
 
-Custom subtypes map to these primitives via the registry's `extraction.subtypes` config (e.g., `attorney: entity`, `filing_date: date`).
+### Extensibility via subtypes
+
+The 11 primitives are fixed — they cover the general case and each has a deterministic normalizer. Domain-specific categories extend via custom subtypes in the registry's `extraction.subtypes` config, not by adding new primitives.
+
+```yaml
+# _registry/object_types.yaml
+extraction:
+  subtypes:
+    attorney: entity
+    filing_date: date
+    equation: entity
+    chemical_formula: entity
+```
+
+This gives projects domain-specific tagging and search (`[[entity:equation|E = mc²]]`) without engine changes. A new primitive is only justified when there's a distinct normalization path that subtypes can't cover.
 
 ## Tier Model
 
@@ -53,12 +67,12 @@ Single deterministic pass. One input, one output. No composition, no judgment.
 | Command | Operation |
 |---------|-----------|
 | `scan` | Structural analysis of raw markdown (no registry needed) |
-| `summary` | Index-backed project snapshot (no file scan, no git) |
+| `summary` | Index-backed project snapshot + warnings (broken refs, validation errors) |
 | `describe` | Project overview from registry + stats |
-| `get hot` | Read frontmatter from file |
+| `get hot` | Read frontmatter + version + updatedAt from file |
 | `get warm` | Read frontmatter + one block via line pointers |
 | `get cold` | Read full file body |
-| `query` | Find documents by type + field filters + projection |
+| `query` | Find documents by type + field filters + projection + sort |
 | `search` | Find extracted objects by primitive/subtype/value |
 | `related` | Graph traversal — outgoing/incoming/both |
 | `schema` | Field definitions, ID prefix, format hints |
@@ -67,8 +81,8 @@ Single deterministic pass. One input, one output. No composition, no judgment.
 | `create` | Write new record + index + git commit |
 | `update` | Modify record + reindex + git commit (frontmatter guarded) |
 | `delete` | Remove record (soft/hard) + git commit |
-| `bulk_create` | Create multiple records + single git commit |
-| `bulk_update` | Update multiple records |
+| `bulk_create` | Create multiple records + single git commit + read-back verification |
+| `bulk_update` | Update multiple records + single git commit + read-back verification |
 | `validate` | Check record(s) against schema |
 | `reindex` | Rebuild index from markdown |
 | `reload` | Reload registry + schemas without restart |
