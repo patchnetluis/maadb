@@ -100,6 +100,8 @@ export async function getDocumentFull(ctx: EngineContext, id: DocId): Promise<Re
   return ok({
     docId: doc.docId,
     docType: doc.docType,
+    version: doc.version,
+    updatedAt: doc.updatedAt,
     frontmatter,
     resolvedRefs,
     objects,

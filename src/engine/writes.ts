@@ -243,6 +243,7 @@ export async function deleteDocument(ctx: EngineContext, id: DocId, mode: 'soft'
       filePath: toFilePath(path.relative(ctx.projectRoot, deletedPath)),
       deleted: true,
       indexedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
     ctx.backend.putDocument(updatedDoc);
   }

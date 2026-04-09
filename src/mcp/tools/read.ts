@@ -30,6 +30,8 @@ export function register(server: McpServer, engine: MaadEngine): void {
       docType: z.string().describe('Document type to query'),
       filters: z.any().optional().describe('Field filters: { fieldName: { op: "eq"|"neq"|"gt"|"gte"|"lt"|"lte"|"in"|"contains", value: ... } }. Examples: { status: { op: "eq", value: "active" } }, { opened_at: { op: "gte", value: "2025-01-01" } }'),
       fields: z.array(z.string()).optional().describe('Field names to return in results (e.g. ["name", "status", "opened_at"]). Only indexed fields available.'),
+      sortBy: z.string().optional().describe('Field name to sort results by (must be an indexed field)'),
+      sortOrder: z.enum(['asc', 'desc']).optional().describe('Sort direction (default desc)'),
       limit: z.number().optional().describe('Max results (default 50)'),
       offset: z.number().optional().describe('Skip first N results'),
     }),
@@ -37,6 +39,8 @@ export function register(server: McpServer, engine: MaadEngine): void {
     const query: import('../../types.js').DocumentQuery = { docType: docType(args.docType) };
     if (args.filters !== undefined) query.filters = args.filters as any;
     if (args.fields !== undefined) query.fields = args.fields;
+    if (args.sortBy !== undefined) query.sortBy = args.sortBy;
+    if (args.sortOrder !== undefined) query.sortOrder = args.sortOrder;
     if (args.limit !== undefined) query.limit = args.limit;
     if (args.offset !== undefined) query.offset = args.offset;
     return resultToResponse(engine.findDocuments(query), 'maad.query');

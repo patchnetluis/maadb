@@ -49,6 +49,8 @@ export interface BulkResult {
 export interface GetResult {
   docId: DocId;
   docType: DocType;
+  version: number;
+  updatedAt: string;
   depth: 'hot' | 'warm' | 'cold';
   frontmatter: Record<string, unknown>;
   block?: { id: string | null; heading: string; content: string } | undefined;
@@ -160,6 +162,8 @@ export interface SummaryResult {
 export interface GetFullResult {
   docId: DocId;
   docType: DocType;
+  version: number;
+  updatedAt: string;
   frontmatter: Record<string, unknown>;
   resolvedRefs: Record<string, { docId: string; name: string }>;
   objects: ObjectMatch[];

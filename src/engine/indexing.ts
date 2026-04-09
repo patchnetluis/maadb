@@ -137,29 +137,51 @@ export function processDocument(ctx: EngineContext, parsed: ParsedDocument): Res
 
   const relativePath = path.relative(ctx.projectRoot, parsed.filePath as string);
   const existing = ctx.backend.getDocument(bound.docId);
+  // Only bump version when file content actually changed — reindex of unchanged files preserves version
+  const contentChanged = !existing || existing.fileHash !== parsed.fileHash;
+  const version = existing
+    ? (contentChanged ? existing.version + 1 : existing.version)
+    : 1;
+  const now = new Date().toISOString();
   const docRecord: DocumentRecord = {
     docId: bound.docId,
     docType: bound.docType,
     schemaRef: bound.schemaRef,
     filePath: toFilePath(relativePath),
     fileHash: parsed.fileHash,
-    version: existing ? existing.version + 1 : 1,
+    version,
     deleted: false,
-    indexedAt: new Date().toISOString(),
+    indexedAt: now,
+    updatedAt: contentChanged ? now : (existing?.updatedAt ?? now),
   };
 
   const fieldIndex: Array<{ name: string; value: string; numericValue: number | null; type: string }> = [];
   for (const [name, field] of Object.entries(validatedFields)) {
     if (field.indexed) {
-      const fieldValue = field.value instanceof Date
-        ? field.value.toISOString().slice(0, 10)
-        : String(field.value);
-      fieldIndex.push({
-        name,
-        value: fieldValue,
-        numericValue: computeNumericValue(field.value, field.fieldType),
-        type: field.fieldType,
-      });
+      // List fields: one row per item so filters match individual values
+      if (field.fieldType === 'list' && Array.isArray(field.value)) {
+        for (const item of field.value) {
+          const itemValue = item instanceof Date
+            ? item.toISOString().slice(0, 10)
+            : String(item);
+          fieldIndex.push({
+            name,
+            value: itemValue,
+            numericValue: computeNumericValue(item, 'string'),
+            type: field.fieldType,
+          });
+        }
+      } else {
+        const fieldValue = field.value instanceof Date
+          ? field.value.toISOString().slice(0, 10)
+          : String(field.value);
+        fieldIndex.push({
+          name,
+          value: fieldValue,
+          numericValue: computeNumericValue(field.value, field.fieldType),
+          type: field.fieldType,
+        });
+      }
     }
   }
 

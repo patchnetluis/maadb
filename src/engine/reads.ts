@@ -49,6 +49,8 @@ export async function getDocument(
   const result: GetResult = {
     docId: doc.docId,
     docType: doc.docType,
+    version: doc.version,
+    updatedAt: doc.updatedAt,
     depth,
     frontmatter,
   };

@@ -324,6 +324,7 @@ export interface DocumentRecord {
   version: number;
   deleted: boolean;
   indexedAt: string;
+  updatedAt: string;
 }
 
 export type FilterCondition =
@@ -337,6 +338,8 @@ export interface DocumentQuery {
   docType?: DocType;
   filters?: Record<string, FilterCondition>;
   fields?: string[];
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
   limit?: number;
   offset?: number;
 }

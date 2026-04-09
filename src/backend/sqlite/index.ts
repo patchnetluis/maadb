@@ -42,6 +42,12 @@ export class SqliteBackend implements MaadBackend {
     this.db.pragma('synchronous = NORMAL');
     this.db.pragma('busy_timeout = 5000');
     this.db.exec(SCHEMA_SQL);
+
+    // Migration: add updated_at column to existing databases
+    const cols = this.db.pragma('table_info(documents)') as Array<{ name: string }>;
+    if (!cols.some(c => c.name === 'updated_at')) {
+      this.db.exec("ALTER TABLE documents ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''");
+    }
   }
 
   close(): void {
@@ -53,8 +59,8 @@ export class SqliteBackend implements MaadBackend {
   putDocument(doc: DocumentRecord): void {
     this.db.prepare(`
       INSERT OR REPLACE INTO documents
-        (doc_id, doc_type, schema_ref, file_path, file_hash, version, deleted, indexed_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        (doc_id, doc_type, schema_ref, file_path, file_hash, version, deleted, indexed_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       doc.docId as string,
       doc.docType as string,
@@ -64,6 +70,7 @@ export class SqliteBackend implements MaadBackend {
       doc.version,
       doc.deleted ? 1 : 0,
       doc.indexedAt,
+      doc.updatedAt,
     );
   }
 
@@ -219,7 +226,16 @@ export class SqliteBackend implements MaadBackend {
 
   findDocuments(query: DocumentQuery): DocumentMatch[] {
     const { where, params } = this.buildDocQuery(query);
-    const sql = `SELECT d.* FROM documents d WHERE ${where} ORDER BY d.indexed_at DESC LIMIT ? OFFSET ?`;
+    let orderClause: string;
+    if (query.sortBy) {
+      const dir = query.sortOrder === 'asc' ? 'ASC' : 'DESC';
+      // Sort via field_index subquery — parameterized to prevent injection
+      orderClause = `ORDER BY (SELECT fi.field_value FROM field_index fi WHERE fi.doc_id = d.doc_id AND fi.field_name = ? LIMIT 1) ${dir}`;
+      params.push(query.sortBy);
+    } else {
+      orderClause = 'ORDER BY d.indexed_at DESC';
+    }
+    const sql = `SELECT d.* FROM documents d WHERE ${where} ${orderClause} LIMIT ? OFFSET ?`;
     params.push(query.limit ?? 50, query.offset ?? 0);
 
     const rows = this.db.prepare(sql).all(...params) as RawDocRow[];
@@ -581,6 +597,7 @@ function rowToDocument(row: RawDocRow): DocumentRecord {
     version: row.version,
     deleted: row.deleted === 1,
     indexedAt: row.indexed_at,
+    updatedAt: row.updated_at,
   };
 }
 
@@ -595,6 +612,7 @@ interface RawDocRow {
   version: number;
   deleted: number;
   indexed_at: string;
+  updated_at: string;
 }
 
 interface RawObjectRow {

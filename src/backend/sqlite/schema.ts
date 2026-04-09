@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS documents (
   file_hash    TEXT NOT NULL,
   version      INTEGER NOT NULL DEFAULT 1,
   deleted      INTEGER NOT NULL DEFAULT 0,
-  indexed_at   TEXT NOT NULL
+  indexed_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_documents_type ON documents(doc_type);
 CREATE INDEX IF NOT EXISTS idx_documents_path ON documents(file_path);
