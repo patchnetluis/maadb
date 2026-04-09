@@ -45,7 +45,7 @@ export async function startServer(opts: ServeOptions): Promise<void> {
   // Create MCP server
   const server = new McpServer({
     name: 'maad',
-    version: '0.2.1',
+    version: '0.2.7',
   });
 
   // Register tools by role tier

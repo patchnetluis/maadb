@@ -38,18 +38,24 @@ Single deterministic pass. One input, one output. No composition, no judgment.
 | `get hot` | Read frontmatter from file |
 | `get warm` | Read frontmatter + one block via line pointers |
 | `get cold` | Read full file body |
-| `query` | Find documents by type + field filters |
+| `query` | Find documents by type + field filters + projection |
 | `search` | Find extracted objects by primitive/subtype/value |
 | `related` | Graph traversal — outgoing/incoming/both |
-| `schema` | Field definitions for a type |
+| `schema` | Field definitions, ID prefix, format hints |
+| `aggregate` | Group by field + optional metric (count/sum/avg/min/max) |
+| `join` | Query + follow refs + project fields from both sides |
 | `create` | Write new record + index + git commit |
-| `update` | Modify record + reindex + git commit |
+| `update` | Modify record + reindex + git commit (frontmatter guarded) |
 | `delete` | Remove record (soft/hard) + git commit |
+| `bulk_create` | Create multiple records + single git commit |
+| `bulk_update` | Update multiple records |
 | `validate` | Check record(s) against schema |
 | `reindex` | Rebuild index from markdown |
+| `reload` | Reload registry + schemas without restart |
+| `health` | Engine status, recovery actions, provenance mode |
 | `parse` | Parse one file, return structure |
 | `history` | Git log for one document |
-| `audit` | Git log for project |
+| `audit` | Git log for project (date-inclusive) |
 
 ### Tier 2 — Deterministic Composite
 

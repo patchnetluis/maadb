@@ -182,7 +182,7 @@ All tools return `{ ok: true, data: {...} }` or `{ ok: false, errors: [...] }`.
 
 ## Current state
 
-**v0.2.5** — Read path improvements, query projection, aggregation, cross-ref joins, bulk ops, provenance flag. 21 admin / 17 writer / 12 reader tools. 260 tests.
+**v0.2.7** — Read/write path improvements from LLM evaluation: query projection, aggregation, cross-ref joins, bulk ops, provenance flag, frontmatter guard, filter shorthand. 21 admin / 17 writer / 12 reader tools. 266 tests.
 
 ## Roadmap
 
