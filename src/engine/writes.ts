@@ -15,11 +15,12 @@ import {
   type FilePath,
   type DocumentRecord,
 } from '../types.js';
+import matter from 'gray-matter';
 import { validateFrontmatter } from '../schema/index.js';
 import { generateDocument, extractBody } from '../writer/index.js';
 import type { EngineContext } from './context.js';
 import { gitCommit } from './context.js';
-import type { CreateResult, UpdateResult, DeleteResult, BulkCreateInput, BulkUpdateInput, BulkResult } from './types.js';
+import type { CreateResult, UpdateResult, DeleteResult, BulkCreateInput, BulkUpdateInput, BulkResult, BulkVerification } from './types.js';
 import { indexFile } from './indexing.js';
 import { generateDocId, readFrontmatter } from './helpers.js';
 import { atomicWrite } from './journal.js';
@@ -374,7 +375,9 @@ export async function bulkCreate(
     });
   }
 
-  return ok({ succeeded, failed, totalRequested: records.length });
+  const verification = await verifyBulkResults(ctx, succeeded, records.map(r => ({ fields: r.fields, body: r.body })));
+
+  return ok({ succeeded, failed, totalRequested: records.length, verification });
 }
 
 export async function bulkUpdate(
@@ -431,5 +434,150 @@ export async function bulkUpdate(
     });
   }
 
-  return ok({ succeeded, failed, totalRequested: updates.length });
+  const verification = await verifyBulkResults(ctx, succeeded, updates.map(u => ({ fields: u.fields ?? {}, body: u.body, appendBody: u.appendBody })));
+
+  return ok({ succeeded, failed, totalRequested: updates.length, verification });
+}
+
+// ---- Read-back verification ------------------------------------------------
+
+interface VerifyInput {
+  fields: Record<string, unknown>;
+  body?: string | undefined;
+  appendBody?: string | undefined;
+}
+
+async function verifyBulkResults(
+  ctx: EngineContext,
+  succeeded: BulkResult['succeeded'],
+  inputs: VerifyInput[],
+): Promise<BulkVerification> {
+  if (succeeded.length === 0) return { sampledIds: [], sampled: 0, passed: 0, mismatches: [] };
+
+  // Deterministic sampling: all for ≤20, evenly spaced 10 for larger batches
+  let sampleIndices: number[];
+  if (succeeded.length <= 20) {
+    sampleIndices = succeeded.map((_, i) => i);
+  } else {
+    const step = succeeded.length / 10;
+    sampleIndices = [];
+    for (let i = 0; i < 10; i++) {
+      sampleIndices.push(Math.floor(i * step));
+    }
+  }
+
+  const mismatches: BulkVerification['mismatches'] = [];
+  const sampledIds: string[] = [];
+  let passed = 0;
+
+  for (const idx of sampleIndices) {
+    const entry = succeeded[idx];
+    if (!entry) continue;
+    sampledIds.push(entry.docId);
+    const input = inputs[entry.index];
+    if (!input) { passed++; continue; }
+
+    // 1. Verify document exists in backend index
+    const doc = ctx.backend.getDocument(toDocId(entry.docId));
+    if (!doc) {
+      mismatches.push({ docId: entry.docId, field: '_index', expected: 'indexed', actual: 'not in backend' });
+      continue;
+    }
+
+    // 2. Read frontmatter from disk and compare fields
+    let fm: Record<string, unknown>;
+    let rawBody: string | undefined;
+    try {
+      const absPath = path.join(ctx.projectRoot, doc.filePath as string);
+      const raw = await readFile(absPath, 'utf-8');
+      fm = matter(raw).data as Record<string, unknown>;
+      rawBody = extractBody(raw);
+    } catch {
+      mismatches.push({ docId: entry.docId, field: '_readable', expected: 'readable', actual: 'file read failed' });
+      continue;
+    }
+
+    let docClean = true;
+
+    for (const [key, expected] of Object.entries(input.fields)) {
+      const actual = fm[key];
+      if (!valuesMatch(expected, actual)) {
+        mismatches.push({ docId: entry.docId, field: key, expected, actual: actual ?? null });
+        docClean = false;
+      }
+    }
+
+    // 3. Verify body if provided
+    if (input.body !== undefined && rawBody !== undefined) {
+      if (input.body.trim() !== rawBody.trim()) {
+        mismatches.push({ docId: entry.docId, field: '_body', expected: `${input.body.length} chars`, actual: `${rawBody.length} chars` });
+        docClean = false;
+      }
+    }
+    if (input.appendBody !== undefined && rawBody !== undefined) {
+      if (!rawBody.includes(input.appendBody.trim())) {
+        mismatches.push({ docId: entry.docId, field: '_appendBody', expected: 'content present', actual: 'appended content not found' });
+        docClean = false;
+      }
+    }
+
+    // 4. Verify indexed fields match field_index
+    const indexedFieldNames = Object.keys(input.fields);
+    if (indexedFieldNames.length > 0) {
+      const fieldValues = ctx.backend.getFieldValues([toDocId(entry.docId)], indexedFieldNames);
+      const stored = fieldValues.get(entry.docId) ?? {};
+      for (const [key, expected] of Object.entries(input.fields)) {
+        const indexedValue = stored[key];
+        if (indexedValue !== undefined && !valuesMatch(expected, indexedValue)) {
+          mismatches.push({ docId: entry.docId, field: `_index.${key}`, expected, actual: indexedValue });
+          docClean = false;
+        }
+      }
+    }
+
+    if (docClean) passed++;
+  }
+
+  return { sampledIds, sampled: sampledIds.length, passed, mismatches };
+}
+
+/** Canonical comparison that handles dates, arrays, and type coercion from gray-matter */
+function valuesMatch(expected: unknown, actual: unknown): boolean {
+  // Both nullish
+  if (expected == null && actual == null) return true;
+  if (expected == null || actual == null) return false;
+
+  // Date handling: gray-matter parses date strings as Date objects
+  if (actual instanceof Date) {
+    const iso = actual.toISOString().slice(0, 10);
+    return String(expected) === iso || String(expected) === actual.toISOString();
+  }
+  if (expected instanceof Date) {
+    const iso = expected.toISOString().slice(0, 10);
+    return String(actual) === iso || String(actual) === expected.toISOString();
+  }
+
+  // Arrays: deep compare via JSON
+  if (Array.isArray(expected) && Array.isArray(actual)) {
+    return JSON.stringify(expected) === JSON.stringify(actual);
+  }
+
+  // Numeric: compare as numbers if both are numeric
+  if (typeof expected === 'number' && typeof actual === 'number') {
+    return expected === actual;
+  }
+  if (typeof expected === 'number' && typeof actual === 'string') {
+    return String(expected) === actual;
+  }
+  if (typeof expected === 'string' && typeof actual === 'number') {
+    return expected === String(actual);
+  }
+
+  // Boolean
+  if (typeof expected === 'boolean' || typeof actual === 'boolean') {
+    return expected === actual;
+  }
+
+  // String fallback
+  return String(expected) === String(actual);
 }

@@ -40,10 +40,18 @@ export interface BulkUpdateInput {
   appendBody?: string;
 }
 
+export interface BulkVerification {
+  sampledIds: string[];
+  sampled: number;
+  passed: number;
+  mismatches: Array<{ docId: string; field: string; expected: unknown; actual: unknown }>;
+}
+
 export interface BulkResult {
   succeeded: Array<{ index: number; docId: string; filePath: string; version: number }>;
   failed: Array<{ index: number; docId: string | null; error: string }>;
   totalRequested: number;
+  verification: BulkVerification;
 }
 
 export interface GetResult {
