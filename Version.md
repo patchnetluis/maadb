@@ -1,9 +1,12 @@
 ---
 enabled: true
-current: 0.2.7
+current: 0.2.8
 ---
 
 # Version History
+
+## 0.2.8 — 2026-04-09
+Version tracking on reads, query sort, updated_at, list field index fix. Reads now return version and updatedAt for optimistic locking. Reindex no longer bumps version when content unchanged. List fields denormalized to one row per item in field_index (fixes broken filters). maad.query supports sortBy/sortOrder. Engine-managed updated_at timestamp on documents table with auto-migration. 266 tests passing.
 
 ## 0.2.7 — 2026-04-08
 Critical: frontmatter guard prevents updates from wiping required fields — aborts before write if any required field would be removed. Write safety: parseFields() at MCP layer handles string-serialized fields, engine rejects non-object fields. Audit fix: date-only --since now inclusive of the specified day (appends T00:00:00). 266 tests passing.
