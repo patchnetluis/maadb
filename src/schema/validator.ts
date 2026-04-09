@@ -37,7 +37,8 @@ export function validateFrontmatter(
       if (fieldDef?.defaultValue !== undefined && fieldDef.defaultValue !== null) {
         continue; // has default, skip
       }
-      errors.push({ field: req, message: 'Required field missing', location: loc });
+      const hint = fieldDef ? describeFieldExpectation(fieldDef, registry) : '';
+      errors.push({ field: req, message: `Required field missing${hint}`, location: loc });
     }
   }
 
@@ -105,18 +106,18 @@ function validateField(
 
     case 'ref':
       if (typeof value !== 'string') {
-        errors.push({ field: name, message: `Expected string for ref, got ${typeof value}`, location: null });
+        errors.push({ field: name, message: `Expected ref to ${def.target ? (def.target as string) : 'any type'}, got ${typeof value}`, location: null });
       } else if (def.target !== null) {
         const targetType = registry.types.get(def.target);
         if (targetType && !value.startsWith(targetType.idPrefix + '-')) {
-          errors.push({ field: name, message: `Ref "${value}" does not start with expected prefix "${targetType.idPrefix}-"`, location: null });
+          errors.push({ field: name, message: `Ref "${value}" must start with "${targetType.idPrefix}-" (references ${def.target as string})`, location: null });
         }
       }
       break;
 
     case 'list':
       if (!Array.isArray(value)) {
-        errors.push({ field: name, message: `Expected array, got ${typeof value}`, location: null });
+        errors.push({ field: name, message: `Expected array of ${def.itemType ?? 'values'}, got ${typeof value}`, location: null });
       } else if (def.itemType === 'ref' && def.target !== null) {
         // Validate each item in a list-of-refs
         const targetType = registry.types.get(def.target);
@@ -124,9 +125,9 @@ function validateField(
           for (let i = 0; i < value.length; i++) {
             const item = value[i];
             if (typeof item !== 'string') {
-              errors.push({ field: `${name}[${i}]`, message: `Expected string ref, got ${typeof item}`, location: null });
+              errors.push({ field: `${name}[${i}]`, message: `Expected ref to ${def.target as string}, got ${typeof item}`, location: null });
             } else if (!item.startsWith(targetType.idPrefix + '-')) {
-              errors.push({ field: `${name}[${i}]`, message: `Ref "${item}" does not start with expected prefix "${targetType.idPrefix}-"`, location: null });
+              errors.push({ field: `${name}[${i}]`, message: `Ref "${item}" must start with "${targetType.idPrefix}-" (references ${def.target as string})`, location: null });
             }
           }
         }
@@ -143,4 +144,26 @@ function validateField(
   }
 
   return errors;
+}
+
+function describeFieldExpectation(def: FieldDefinition, registry: Registry): string {
+  switch (def.type) {
+    case 'ref': {
+      if (!def.target) return ' — expected a ref';
+      const targetType = registry.types.get(def.target);
+      return targetType
+        ? ` — expected ref to ${def.target as string} (prefix "${targetType.idPrefix}-")`
+        : ` — expected ref to ${def.target as string}`;
+    }
+    case 'enum':
+      return def.values ? ` — must be one of: ${def.values.join(', ')}` : ' — expected enum value';
+    case 'date':
+      return def.format ? ` — expected date (${def.format})` : ' — expected date string';
+    case 'amount':
+      return ' — expected amount (e.g. "100.00 USD")';
+    case 'list':
+      return ` — expected array of ${def.itemType ?? 'values'}`;
+    default:
+      return ` — expected ${def.type}`;
+  }
 }

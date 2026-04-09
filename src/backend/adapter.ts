@@ -56,6 +56,7 @@ export interface MaadBackend {
   getFileHash(path: FilePath): string | null;
   getAllFileHashes(): Map<FilePath, string>;
   getStats(): BackendStats;
+  countBrokenRefs(): number;
 
   // Batch write (wraps all puts in a transaction for a single document)
   materializeDocument(

@@ -533,6 +533,15 @@ export class SqliteBackend implements MaadBackend {
       documentCountByType,
     };
   }
+
+  countBrokenRefs(): number {
+    const row = this.db.prepare(`
+      SELECT COUNT(*) as cnt FROM relationships r
+      WHERE r.relation_type = 'ref'
+        AND r.target_doc_id NOT IN (SELECT doc_id FROM documents WHERE deleted = 0)
+    `).get() as { cnt: number };
+    return row.cnt;
+  }
 }
 
 // --- Helpers ---------------------------------------------------------------

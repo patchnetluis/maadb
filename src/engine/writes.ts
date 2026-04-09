@@ -105,6 +105,7 @@ export async function updateDocument(
   body?: string | undefined,
   appendBody?: string | undefined,
   expectedVersion?: number | undefined,
+  skipGit?: boolean | undefined,
 ): Promise<Result<UpdateResult>> {
   const doc = ctx.backend.getDocument(id);
   if (!doc) return singleErr('FILE_NOT_FOUND', `Document "${id as string}" not found`);
@@ -187,20 +188,22 @@ export async function updateDocument(
   }
   ctx.journal.advance(journalId, 'indexed');
 
-  const detail = changedFields.length > 0
-    ? `fields:${changedFields.join(',')}`
-    : (appendBody ? 'body:append' : 'body:replace');
-  const summaryStr = changedFields.length > 0
-    ? changedFields.map(f => `${f}: ${String(updatedFm[f] ?? '')}`).join(', ')
-    : 'Body updated';
-  await gitCommit(ctx, {
-    action: 'update',
-    docId: id,
-    docType: doc.docType,
-    detail,
-    summary: summaryStr,
-    files: [absPath],
-  });
+  if (!skipGit) {
+    const detail = changedFields.length > 0
+      ? `fields:${changedFields.join(',')}`
+      : (appendBody ? 'body:append' : 'body:replace');
+    const summaryStr = changedFields.length > 0
+      ? changedFields.map(f => `${f}: ${String(updatedFm[f] ?? '')}`).join(', ')
+      : 'Body updated';
+    await gitCommit(ctx, {
+      action: 'update',
+      docId: id,
+      docType: doc.docType,
+      detail,
+      summary: summaryStr,
+      files: [absPath],
+    });
+  }
   ctx.journal.advance(journalId, 'committed');
   ctx.journal.complete(journalId);
 
@@ -392,6 +395,7 @@ export async function bulkUpdate(
       upd.body,
       upd.appendBody,
       undefined, // no expectedVersion in bulk
+      true,      // skipGit — single commit at the end
     );
 
     if (result.ok) {
@@ -413,9 +417,19 @@ export async function bulkUpdate(
     }
   }
 
-  // Note: individual updates already git-commit. For bulk, this is a known limitation —
-  // each update goes through the full pipeline including git. A future optimization
-  // could batch git commits, but it requires refactoring updateDocument to accept a skipGit flag.
+  // Single git commit for all succeeded records
+  const first = succeeded[0];
+  if (first) {
+    const firstDoc = ctx.backend.getDocument(first.docId as DocId);
+    await gitCommit(ctx, {
+      action: 'update',
+      docId: toDocId(first.docId),
+      docType: firstDoc?.docType ?? ('unknown' as DocType),
+      detail: `bulk:${succeeded.length}`,
+      summary: `Bulk updated ${succeeded.length} records`,
+      files: allFiles,
+    });
+  }
 
   return ok({ succeeded, failed, totalRequested: updates.length });
 }

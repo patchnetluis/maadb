@@ -7,6 +7,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { ok, singleErr, type Result } from '../errors.js';
+import { validateFrontmatter } from '../schema/index.js';
 import { logger } from './logger.js';
 import {
   docId as toDocId,
@@ -33,7 +34,7 @@ import type {
   JoinResult,
   JoinResultRow,
 } from './types.js';
-import { readFrontmatter, readBlockContent } from './helpers.js';
+import { readFrontmatter, readFrontmatterSync, readBlockContent } from './helpers.js';
 
 export async function getDocument(
   ctx: EngineContext,
@@ -177,6 +178,22 @@ export function summary(ctx: EngineContext): SummaryResult {
 
   const subtypeInventory = ctx.backend.getSubtypeInventory(20);
 
+  // Warnings: broken refs (cheap SQL) + validation errors (scan all docs)
+  const brokenRefs = ctx.backend.countBrokenRefs();
+  let validationErrors = 0;
+  const allDocs = ctx.backend.findDocuments({ limit: 100000 });
+  for (const match of allDocs) {
+    const doc = ctx.backend.getDocument(match.docId);
+    if (!doc) continue;
+    const schema = ctx.schemaStore.getSchemaForType(doc.docType);
+    if (!schema) { validationErrors++; continue; }
+    const fm = readFrontmatterSync(ctx.projectRoot, doc);
+    if (fm) {
+      const result = validateFrontmatter(fm, schema, ctx.registry);
+      if (!result.valid) validationErrors++;
+    }
+  }
+
   return {
     types,
     totalDocuments: stats.totalDocuments,
@@ -184,6 +201,7 @@ export function summary(ctx: EngineContext): SummaryResult {
     totalRelationships: stats.totalRelationships,
     lastIndexedAt: stats.lastIndexedAt,
     subtypeInventory,
+    warnings: { brokenRefs, validationErrors },
   };
 }
 

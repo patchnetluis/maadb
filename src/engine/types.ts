@@ -157,6 +157,10 @@ export interface SummaryResult {
     count: number;
     topValues: string[];
   }>;
+  warnings: {
+    brokenRefs: number;
+    validationErrors: number;
+  };
 }
 
 export interface GetFullResult {
