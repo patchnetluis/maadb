@@ -2,6 +2,7 @@ node_modules/
 dist/
 _backend/
 .claude/
+CLAUDE.md
 MAAD.md
 
 # Test temp directories
