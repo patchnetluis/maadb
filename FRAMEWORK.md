@@ -20,6 +20,26 @@ The goal is speed, efficiency, and a world model for data categorization — who
 
 5. **YAML is the interface language.** Registry, schemas, and configuration are YAML. YAML syntax, MAAD semantics — only MAAD-approved keys and patterns are accepted.
 
+## Extraction Primitives
+
+The engine recognizes 11 built-in primitives for inline annotation extraction (`[[type:value|label]]`). These are the atomic categories for classifying extracted objects.
+
+| Primitive | What it captures | Example annotation |
+|-----------|-----------------|-------------------|
+| `entity` | People, organizations, things | `[[entity:Jane Smith\|Jane]]` |
+| `date` | Dates and timestamps | `[[date:2026-03-28\|March 28]]` |
+| `duration` | Time spans | `[[duration:6 months\|half a year]]` |
+| `amount` | Money / currency values | `[[amount:1250000 USD\|$1.25M]]` |
+| `measure` | Measurements with units | `[[measure:42 kg\|weight]]` |
+| `quantity` | Counts and numbers | `[[quantity:150\|headcount]]` |
+| `percentage` | Percent values | `[[percentage:12.5%\|growth rate]]` |
+| `location` | Places, addresses | `[[location:Austin, TX\|office]]` |
+| `identifier` | IDs, codes, reference numbers | `[[identifier:INV-2026-0042\|invoice]]` |
+| `contact` | Email, phone | `[[contact:jane@acme.com\|email]]` |
+| `media` | File references, URLs | `[[media:report.pdf\|attachment]]` |
+
+Custom subtypes map to these primitives via the registry's `extraction.subtypes` config (e.g., `attorney: entity`, `filing_date: date`).
+
 ## Tier Model
 
 The engine is lean. The LLM is smart. Push composition up, keep primitives down.
