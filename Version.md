@@ -1,9 +1,12 @@
 ---
 enabled: true
-current: 0.2.10
+current: 0.2.11
 ---
 
 # Version History
+
+## 0.2.11 — 2026-04-09
+Dynamic server version from package.json, MAAD_PROJECT/MAAD_ROLE/MAAD_PROV env var fallbacks for container deployments, OpenClaw MCP registration docs in README. 266 tests passing.
 
 ## 0.2.10 — 2026-04-09
 Read-back verification on bulk_create and bulk_update. Deterministic sampling (all ≤20, evenly spaced 10 for larger). Canonical value comparison (dates, arrays, booleans). Verifies frontmatter, body content, and field_index integrity. Returns sampledIds for auditability. 266 tests passing.
