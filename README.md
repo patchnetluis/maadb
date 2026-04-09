@@ -1,8 +1,6 @@
 # MAAD — Markdown As A Database
 
-A lightweight engine that treats markdown files as the canonical data store, builds a queryable index, and gives LLMs deterministic read/write access.
-
-Markdown is the source of truth. YAML is the interface language. SQLite is a rebuildable index — delete it and reconstruct from markdown in one pass. Nothing is lost.
+A lightweight engine that treats markdown files as the canonical data store, builds a queryable index, and gives LLMs deterministic read/write access. SQLite is a rebuildable index — delete it and reconstruct from markdown in one pass.
 
 ## Why
 
@@ -11,11 +9,11 @@ Traditional databases capture fragments — enough to run a query or generate a 
 ## How it works
 
 ```
-Markdown files (canonical records)
-  -> YAML registry + schemas (structure definitions)
-  -> 6-stage pipeline (parse, validate, extract, materialize)
-  -> SQLite index (pointer-only — no data stored, just pointers)
-  -> CLI + MCP server (12 reader / 17 writer / 21 admin tools)
+Markdown files (your data)
+  -> YAML registry + schemas (define structure)
+  -> Engine (parse, validate, extract, index)
+  -> SQLite (pointer-only query index)
+  -> MCP server (LLM agent interface)
 ```
 
 ### Record format
@@ -44,156 +42,251 @@ Initial issue raised on [[date:2026-03-28|March 28, 2026]].
 [[person:Jane Smith|Jane]] representing [[org:Acme Corporation|Acme]].
 ```
 
-Frontmatter = structured fields. Headings = addressable sections. `[[type:value|label]]` = inline annotations extracted and indexed by the engine. 11 extraction primitives: `entity`, `date`, `duration`, `amount`, `measure`, `quantity`, `percentage`, `location`, `identifier`, `contact`, `media`.
+Three layers: frontmatter for structured fields, headings for addressable sections, `[[type:value|label]]` annotations for inline entities extracted and indexed by the engine.
 
-## Setup
+## Deployment
+
+MAAD is designed for LLM agents. The typical deployment is: clone the engine, create a project, wire up MCP, and let an agent build and operate the database.
+
+### Prerequisites
+
+- Node.js 22+ (tested on v24)
+- npm
+- Git (required — MAAD uses git for audit trail)
+
+### Step 1 — Install the engine
 
 ```bash
+git clone https://github.com/patchnetluis/maad.git
+cd maad
 npm install && npm run build
 ```
 
-### Create a project
+### Step 2 — Create a project
+
+A project is a directory with a `--project` path passed to the MCP server. It can live anywhere. You only need to create the directory — the agent handles the internal structure (`_registry/`, `_schema/`, `data/`, etc.) via the Architect skill after MCP is connected.
 
 ```bash
-maad init my-project
+mkdir my-project
 ```
 
-Creates: `_registry/`, `_schema/`, `_backend/`, `_import/`, `.gitignore`, `MAAD.md`
+### Step 3 — Wire up MCP
 
-### Connect an LLM agent
+The MCP server connects an LLM agent to your project. Configuration depends on your platform.
 
-**Claude Desktop / VS Code** — add to MCP settings:
+**Claude Code** — add to `.mcp.json` in the project directory:
+
 ```json
 {
   "mcpServers": {
     "maad": {
       "command": "node",
-      "args": ["/path/to/maad/dist/cli.js", "--project", "/path/to/project", "serve", "--role", "writer"]
+      "args": [
+        "/absolute/path/to/maad/dist/cli.js",
+        "--project", "/absolute/path/to/my-project",
+        "serve",
+        "--role", "admin"
+      ]
     }
   }
 }
 ```
 
-**CLI** (testing / debugging):
+**Claude Desktop** — add to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "maad": {
+      "command": "node",
+      "args": [
+        "/absolute/path/to/maad/dist/cli.js",
+        "--project", "/absolute/path/to/my-project",
+        "serve",
+        "--role", "admin"
+      ]
+    }
+  }
+}
+```
+
+**Any MCP-compatible agent** — MAAD uses stdio transport. The command is:
+
 ```bash
-maad serve --project ./my-project --role writer
+node /path/to/maad/dist/cli.js --project /path/to/project serve --role <reader|writer|admin>
 ```
 
-### Onboarding data
+### Step 4 — Connect and build
 
-The agent handles everything after files are staged in `_import/`:
+After wiring MCP, restart your agent session. The agent will see `maad.*` tools. From there:
 
+1. Agent reads `MAAD.md` → sees this is a MAAD project
+2. Agent runs `maad.summary` → detects empty project
+3. Agent reads `_skills/architect-core.md` → enters Architect mode
+4. Agent designs schema based on your goal, deploys the database
+
+Tell the agent what you want: *"Set up a CRM for my law firm"*, *"Index my research papers for querying"*, *"Create a persistent memory store for this agent."* The Architect handles the rest.
+
+## Access Roles
+
+MCP roles control what tools an agent can use. Set via `--role` flag at server startup.
+
+| Role | Tools | Use case |
+|------|-------|----------|
+| `reader` (default) | scan, summary, describe, get, query, search, related, schema, aggregate, join, history, audit | Read-only agents, reporting, analysis |
+| `writer` | reader + create, update, validate, bulk_create, bulk_update | Standard agents that read and write records |
+| `admin` | writer + delete, reindex, reload, health | Project setup, schema changes, maintenance |
+
+### Recommended workflow
+
+The MCP `--role` flag maps to a typical admin/user split. For initial setup, use `--role admin`. After the project is operational, connect additional agents with scoped roles (`reader` or `writer`).
+
+Today this is trust-based — roles control which tools are visible, but agents with filesystem access can bypass MCP. True enforcement comes with remote MCP transport (roadmap 0.9.0).
+
+### Multiple agents, one project
+
+Each agent gets its own MCP config pointing at the same project with the appropriate role:
+
+```json
+{
+  "mcpServers": {
+    "maad-admin": {
+      "command": "node",
+      "args": ["...", "serve", "--role", "admin"]
+    },
+    "maad-user": {
+      "command": "node",
+      "args": ["...", "serve", "--role", "writer"]
+    }
+  }
+}
 ```
-1. Files placed in _import/       (by agent, API, human, or any source)
-2. Agent: scan _import/            → corpus patterns, document families
-3. Agent: creates _registry + _schema from scan output
-4. Agent: adds frontmatter, moves files to type folders
-5. Agent: reindex --force          → index built
-6. Agent: summary                  → oriented, ready to work
+
+### Multiple projects
+
+Each project gets its own MCP server. No cross-project routing — projects are independent.
+
+```json
+{
+  "mcpServers": {
+    "maad-crm": {
+      "command": "node",
+      "args": ["...", "--project", "/path/to/crm", "serve", "--role", "admin"]
+    },
+    "maad-research": {
+      "command": "node",
+      "args": ["...", "--project", "/path/to/research", "serve", "--role", "writer"]
+    }
+  }
+}
 ```
 
-`scan` works at two levels:
-- **`scan <file.md>`** — structural read of one document
-- **`scan <dir/>`** — corpus-level patterns (recurring fields, headings, document families)
-
-## Project layout
+## Project Layout
 
 ```
 my-project/
-  _registry/                      # Engine config: type definitions
+  _registry/                      # Type definitions (YAML)
     object_types.yaml
-  _schema/                        # Engine config: field schemas per type
+  _schema/                        # Field schemas per type (YAML)
     client.v1.yaml
-  _backend/                       # Derived index (gitignored)
+  _backend/                       # Derived index — gitignored, rebuildable
     maad.db
-  _import/                        # Staging area for raw files (gitignored)
-
-  clients/                        # Records — one folder per registered type
-    cli-acme.md
-  cases/
-    cas-2026-001.md
-
-  MAAD.md                         # Generated: LLM operating instructions
-  SCHEMA.md                       # Generated: data reference
+  _inbox/                         # Raw files for import — drop zone
+  _skills/                        # Agent skill files (architect, import, etc.)
+  data/                           # All records live here
+    clients/                      #   One folder per registered type
+      cli-acme.md
+    cases/
+      cas-2026-001.md
+  MAAD.md                         # Generated: agent operating instructions
 ```
 
-**Convention:** `_` prefix = engine-managed. No prefix = your data. Root `.md` = generated docs.
+**Convention:** `_` prefix = engine-managed. `data/` = your records. Records never live at the project root.
 
-## Commands
+## Project Archetypes
 
-### Discover
-| Command | What it does |
-|---------|-------------|
-| `scan <file\|dir>` | Analyze raw markdown — no registry needed |
-| `summary` | **Start here.** Types, counts, sample IDs, object inventory |
-| `describe` | Project overview: types, doc counts, primitives |
+MAAD supports different project patterns. The Architect skill (`_skills/architect-core.md`) guides schema design based on the archetype.
 
-### Read
-| Command | What it does |
-|---------|-------------|
-| `get <id> hot` | Frontmatter only (cheapest read) |
-| `get <id> warm <block>` | Frontmatter + one section |
-| `get <id> cold` | Full document body (expensive) |
-| `get <id> full` | Resolved record: refs, objects, related docs |
-| `query <type> [--filter k=v]` | Find documents by type and filters |
-| `search <primitive> [--doc id]` | Cross-document object search |
-| `related <id> [direction]` | Connected documents |
-| `schema <type>` | Field definitions for a type |
+| Archetype | Data flow | Examples |
+|-----------|-----------|---------|
+| **Living database** | Read + write, ongoing records | CRM, job tracker, case management |
+| **Static catalog** | Import once, query often | Research papers, book collection, product catalog |
+| **Accumulation log** | Append-heavy, time-series | Expense tracker, meeting notes, daily logs |
+| **Analysis project** | Import + cross-reference | Historical records, competitive research, audit corpus |
+| **Agent memory** | Agent-written, agent-read | Preferences, learned patterns, project context |
 
-### Write
-| Command | What it does |
-|---------|-------------|
-| `create <type> --field k=v` | Create a new record |
-| `update <id> --field k=v` | Update frontmatter fields |
-| `update <id> --append "text"` | Append to document body |
-
-### Maintain
-| Command | What it does |
-|---------|-------------|
-| `validate [id]` | Validate against schemas |
-| `reindex [--force]` | Rebuild index from markdown |
-| `history <id>` | Git history for a document |
-| `audit [--since date]` | Project-wide activity |
-
-## MCP Server
-
-Native LLM tool access via Model Context Protocol. Role-based access, stdio transport. Provenance mode (`--prov on|detail`) for source attribution.
-
-| Role | Tools | Count |
-|------|-------|-------|
-| reader (default) | scan, summary, describe, get, query, search, related, schema, aggregate, join, history, audit | 12 |
-| writer | reader + create, update, validate, bulk_create, bulk_update | 17 |
-| admin | writer + delete, reindex, reload, health | 21 |
+## MCP Tools
 
 All tools return `{ ok: true, data: {...} }` or `{ ok: false, errors: [...] }`.
 
-## LLM boot flow
+### Discover
+| Tool | What it does |
+|------|-------------|
+| `maad.scan` | Analyze raw markdown — no registry needed |
+| `maad.summary` | **Start here.** Types, counts, sample IDs, object inventory |
+| `maad.describe` | Project overview: types, doc counts, primitives |
+| `maad.schema` | Field definitions for a type |
 
-1. Read `MAAD.md` — stable operating instructions
-2. Run `summary` — live project snapshot
-3. Use commands as needed
+### Read
+| Tool | What it does |
+|------|-------------|
+| `maad.get` | Read a record (hot/warm/cold/full tiers) |
+| `maad.query` | Find documents by type, filters, and field projection |
+| `maad.search` | Cross-document object search |
+| `maad.related` | Connected documents via ref traversal |
+| `maad.aggregate` | Count/sum/avg/min/max grouped by field |
+| `maad.join` | Query + follow refs + project fields from both sides |
+
+### Write
+| Tool | What it does |
+|------|-------------|
+| `maad.create` | Create a new record |
+| `maad.update` | Modify fields or append to body |
+| `maad.bulk_create` | Create multiple records in one call |
+| `maad.bulk_update` | Update multiple records in one call |
+| `maad.validate` | Check record(s) against schema |
+
+### Maintain
+| Tool | What it does |
+|------|-------------|
+| `maad.delete` | Remove a record |
+| `maad.reindex` | Rebuild index from markdown |
+| `maad.reload` | Reload registry + schemas without restart |
+| `maad.health` | Engine status and diagnostics |
+| `maad.history` | Git history for a document |
+| `maad.audit` | Project-wide activity log |
+
+## Agent Boot Flow
+
+1. Agent reads `MAAD.md` → stable operating instructions
+2. Agent runs `maad.summary` → live project snapshot
+3. If empty project → reads `_skills/architect-core.md`, enters Architect mode
+4. If live project → uses MCP tools for normal operations
 
 ## Stack
 
-- TypeScript strict, Node.js 18+
+- TypeScript strict, Node.js 22+ (tested on v24)
 - 4 production dependencies: `better-sqlite3`, `gray-matter`, `simple-git`, `@modelcontextprotocol/sdk`
-- 211 tests, Vitest
+- 266 tests, Vitest
 - See [FRAMEWORK.md](FRAMEWORK.md) for data doctrine, tier model, and engine design principles
 
-## Current state
+## Current State
 
-**v0.2.7** — Read/write path improvements from LLM evaluation: query projection, aggregation, cross-ref joins, bulk ops, provenance flag, frontmatter guard, filter shorthand. 21 admin / 17 writer / 12 reader tools. 266 tests.
+**v0.2.7** — MCP server live, query projection, aggregation, cross-ref joins, bulk ops, provenance flag. 266 tests passing.
 
 ## Roadmap
 
 | Version | What |
 |---------|------|
 | ~~0.2.x~~ | ~~MCP server, production hardening, read path improvements~~ — **shipped** |
-| 0.3.0 | LLM evaluation + bulk ops — maadb-demo, benchmarks |
-| 0.4.0 | Provenance + admin tooling |
-| 0.5.0 | Query power — FTS5, fuzzy entity matching |
-| 0.6.0 | Object attributes — user-defined tags, YAML-stored |
-| 0.7.0 | Multi-project MCP |
+| 0.3.0 | LLM evaluation — benchmarks, multi-model testing |
+| 0.3.5 | Deployment workflow — deploy skill, scaffolding, MCP config generation |
+| 0.4.0 | Import workflow — inbox pattern, duplicate detection, readonly types |
+| 0.5.0 | Provenance + admin tooling |
+| 0.6.0 | Query power — FTS5, fuzzy entity matching |
+| 0.7.0 | Object attributes — user-defined tags, YAML-stored |
+| 0.8.0 | npm package prep |
+| 0.9.0 | Remote MCP — HTTP/SSE transport, per-connection roles, hosted deployment |
 | 1.0.0 | Stable release — API locked, npm published |
 
 ## License
