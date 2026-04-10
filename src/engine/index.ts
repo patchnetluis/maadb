@@ -47,6 +47,7 @@ export type {
   GetFullResult,
   SchemaInfoResult,
   ValidationReport,
+  VerifyResult,
 } from './types.js';
 
 export interface HealthReport {
@@ -180,6 +181,8 @@ export class MaadEngine {
   schemaInfo(dt: DocType) { return reads.schemaInfo(this.ctx(), dt); }
   aggregate(query: import('./types.js').AggregateQuery) { return reads.aggregate(this.ctx(), query); }
   join(query: import('./types.js').JoinQuery) { return reads.join(this.ctx(), query); }
+  async verifyField(id: DocId, field: string, expected: unknown) { return reads.verifyField(this.ctx(), id, field, expected); }
+  verifyCount(dt: DocType, expectedCount: number, filters?: Record<string, import('../types.js').FilterCondition>) { return reads.verifyCount(this.ctx(), dt, expectedCount, filters); }
 
   // --- Composites (Tier 2, provisional) ---
   async getDocumentFull(id: DocId) { return composites.getDocumentFull(this.ctx(), id); }

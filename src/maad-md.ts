@@ -117,6 +117,8 @@ function generateFullCommandRef(cmd: string): string {
 | \`schema <type>\` | Field definitions, ID prefix, format hints (use before writes) |
 | \`aggregate\` | Group by a field with optional metric (count/sum/avg/min/max) |
 | \`join\` | Query + follow refs + project fields from both sides in one call |
+| \`verify mode=field\` | Fact-check a field value: grounded true/false + actual value + source |
+| \`verify mode=count\` | Fact-check a document count: grounded true/false + actual count |
 
 ### Write
 | Command | What it does |
@@ -181,7 +183,22 @@ function generateRules(): string {
 5. **Use \`search\` for cross-document queries** — don't open files to find people/dates/amounts
 6. **Use \`related\` for graph traversal** — don't manually search for connected docs
 7. **Cite \`doc_id\` and \`block_id\`** in answers for traceability
-8. **\`reindex --force\`** recovers from any stale state`;
+8. **\`reindex --force\`** recovers from any stale state
+
+## Grounding Rules (CRITICAL)
+
+**Never state a number, date, amount, count, or ID from memory.** Always query first.
+
+- Before reporting a field value → call \`get\` or \`verify\` with the doc_id and field
+- Before reporting a count → call \`verify\` in count mode or \`query\` with the type and filters
+- Before reporting a relationship → call \`related\` or \`join\`
+- If you cannot ground a claim from the database → say "unable to verify from records"
+
+Use \`maad.verify\` to fact-check before answering:
+- \`verify mode=field docId=cas-001 field=claim_amount expected="1500000.00 USD"\`
+- \`verify mode=count docType=case expectedCount=12 filters={status: "open"}\`
+
+**The pattern:** query or verify → confirm grounded → then answer. Never the reverse.`;
 }
 
 function generateCompositionPatterns(cmd: string): string {

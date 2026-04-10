@@ -186,6 +186,14 @@ export interface GetFullResult {
   latestNote: { docId: string; summary: string; timestamp: string } | null;
 }
 
+export interface VerifyResult {
+  grounded: boolean;
+  claim: 'field' | 'count';
+  expected: unknown;
+  actual: unknown;
+  source: { docId: string; filePath: string } | 'query';
+}
+
 export interface SchemaInfoResult {
   type: string;
   idPrefix: string;

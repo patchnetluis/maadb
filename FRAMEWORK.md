@@ -2,23 +2,19 @@
 
 ## What MAAD Is
 
-An LLM-native database engine that treats markdown files as canonical and gives LLMs deterministic read/write access to unstructured data sources.
+A database engine that treats markdown files as canonical records and provides deterministic read/write access through a structured interface.
 
-LLMs first. Humans interface via the LLM agent, not directly.
-
-The goal is speed, efficiency, and a world model for data categorization — who, what, when, where, how, and **why**. Keeping markdown as canonical is the key to covering all six dimensions. Traditional databases capture fragments. Markdown carries the full narrative.
+Markdown remains the source of truth, while schemas and indexing make records queryable, linkable, and easier to work with programmatically. It is designed for document-centric data where structured fields and narrative context need to live together in the same record.
 
 ## Data Doctrine
 
-1. **Markdown is canonical.** The markdown file is the record. It carries the complete picture — structured fields in frontmatter, addressable sections via headings, and the narrative that explains *why*.
+1. **Markdown is canonical.** The markdown file is the record — structured fields in frontmatter, addressable sections via headings, narrative in the body.
 
-2. **SQLite is derived.** The database is a rebuildable pointer index. Delete it, reindex, nothing is lost. It exists for query speed, not as a source of truth.
+2. **The parser is interpretive, not authoritative.** The engine reads and indexes what the markdown says. It does not decide what the markdown should say.
 
-3. **The parser is interpretive, not authoritative.** The engine reads and indexes what the markdown says. It does not decide what the markdown should say.
+3. **All writes go through the engine.** No direct file edits. This preserves validation, indexing, and the git audit trail.
 
-4. **The agent never writes around the engine.** All mutations to markdown records go through engine tools. No direct file edits. This preserves validation, indexing, and the git audit trail.
-
-5. **YAML is the interface language.** Registry, schemas, and configuration are YAML. YAML syntax, MAAD semantics — only MAAD-approved keys and patterns are accepted.
+4. **YAML is the interface language.** Registry, schemas, and configuration are YAML. YAML syntax, MAAD semantics.
 
 ## Extraction Primitives
 
@@ -78,6 +74,7 @@ Single deterministic pass. One input, one output. No composition, no judgment.
 | `schema` | Field definitions, ID prefix, format hints |
 | `aggregate` | Group by field + optional metric (count/sum/avg/min/max) |
 | `join` | Query + follow refs + project fields from both sides |
+| `verify` | Fact-check a field value or document count — grounded/not-grounded + source |
 | `create` | Write new record + index + git commit |
 | `update` | Modify record + reindex + git commit (frontmatter guarded) |
 | `delete` | Remove record (soft/hard) + git commit |

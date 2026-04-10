@@ -4,6 +4,13 @@ _backend/
 .claude/
 CLAUDE.md
 MAAD.md
+.env
+.env.*
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
 
 # Test temp directories
 tests/fixtures/_temp-*/

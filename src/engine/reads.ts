@@ -28,6 +28,7 @@ import type {
   DescribeResult,
   SummaryResult,
   SchemaInfoResult,
+  VerifyResult,
   AggregateQuery,
   AggregateResult,
   JoinQuery,
@@ -331,4 +332,60 @@ export function join(ctx: EngineContext, query: JoinQuery): Result<JoinResult> {
   }
 
   return ok({ total, results });
+}
+
+// ---- Verify — fact-checking primitive --------------------------------------
+
+export async function verifyField(
+  ctx: EngineContext,
+  id: DocId,
+  field: string,
+  expected: unknown,
+): Promise<Result<VerifyResult>> {
+  const doc = ctx.backend.getDocument(id);
+  if (!doc) {
+    return ok({
+      grounded: false,
+      claim: 'field',
+      expected,
+      actual: null,
+      source: { docId: id as string, filePath: '' },
+    });
+  }
+
+  const fm = await readFrontmatter(ctx.projectRoot, doc);
+  const actual = fm[field] ?? null;
+
+  // Canonical comparison (handles dates, arrays, type coercion)
+  const actualStr = actual instanceof Date ? actual.toISOString().slice(0, 10) : String(actual ?? '');
+  const expectedStr = expected instanceof Date ? expected.toISOString().slice(0, 10) : String(expected ?? '');
+  const grounded = actualStr === expectedStr
+    || (Array.isArray(expected) && Array.isArray(actual) && JSON.stringify(expected) === JSON.stringify(actual));
+
+  return ok({
+    grounded,
+    claim: 'field',
+    expected,
+    actual,
+    source: { docId: id as string, filePath: doc.filePath as string },
+  });
+}
+
+export function verifyCount(
+  ctx: EngineContext,
+  dt: DocType,
+  expectedCount: number,
+  filters?: Record<string, import('../types.js').FilterCondition>,
+): Result<VerifyResult> {
+  const query: DocumentQuery = { docType: dt, limit: 0 };
+  if (filters) query.filters = filters;
+  const actual = ctx.backend.countDocuments(query);
+
+  return ok({
+    grounded: actual === expectedCount,
+    claim: 'count',
+    expected: expectedCount,
+    actual,
+    source: 'query',
+  });
 }

@@ -113,6 +113,33 @@ export function register(server: McpServer, engine: MaadEngine): void {
     return resultToResponse(engine.aggregate(query), 'maad.aggregate');
   });
 
+  server.registerTool('maad.verify', {
+    description: 'Fact-check a claim against the database. Two modes: (1) field — verify a specific field value on a document, (2) count — verify a document count for a type with optional filters. Use this BEFORE stating any number, date, amount, or count as fact.',
+    inputSchema: z.object({
+      mode: z.enum(['field', 'count']).describe('Verification mode'),
+      docId: z.string().optional().describe('Document ID (required for field mode)'),
+      field: z.string().optional().describe('Field name to verify (required for field mode)'),
+      expected: z.any().optional().describe('Expected value for the field (required for field mode)'),
+      docType: z.string().optional().describe('Document type (required for count mode)'),
+      expectedCount: z.number().optional().describe('Expected document count (required for count mode)'),
+      filters: z.any().optional().describe('Field filters for count mode (same format as maad.query)'),
+    }),
+  }, async (args) => {
+    if (args.mode === 'field') {
+      if (!args.docId || !args.field || args.expected === undefined) {
+        return resultToResponse({ ok: false, errors: [{ code: 'INVALID_ARGS', message: 'field mode requires docId, field, and expected' }] } as any, 'maad.verify');
+      }
+      return resultToResponse(await engine.verifyField(docId(args.docId), args.field, args.expected), 'maad.verify');
+    }
+    if (args.mode === 'count') {
+      if (!args.docType || args.expectedCount === undefined) {
+        return resultToResponse({ ok: false, errors: [{ code: 'INVALID_ARGS', message: 'count mode requires docType and expectedCount' }] } as any, 'maad.verify');
+      }
+      return resultToResponse(engine.verifyCount(docType(args.docType), args.expectedCount, args.filters as any), 'maad.verify');
+    }
+    return resultToResponse({ ok: false, errors: [{ code: 'INVALID_ARGS', message: 'mode must be "field" or "count"' }] } as any, 'maad.verify');
+  });
+
   server.registerTool('maad.join', {
     description: 'Queries documents and follows ref fields to return projected fields from both source and target records in one call. Eliminates N+1 round-trips. Example: all cases with their client name and attorney name.',
     inputSchema: z.object({

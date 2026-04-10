@@ -26,7 +26,7 @@
     "yaml",
     "indexing"
   ],
-  "author": "Luis Martinez <lmartinez@patchnet.net>",
+  "author": "Luis Martinez <luis@patchnet.ai>",
   "license": "MIT",
   "engines": {
     "node": ">=22.0.0"

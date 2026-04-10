@@ -58,16 +58,16 @@ export async function startServer(opts: ServeOptions): Promise<void> {
   discoverTools.register(server, engine, config.projectRoot);
   readTools.register(server, engine);
   auditTools.register(server, engine);
-  toolCount = 12;
+  toolCount = 13;
 
   if (config.role === 'writer' || config.role === 'admin') {
     writeTools.register(server, engine);
-    toolCount = 17;
+    toolCount = 18;
   }
 
   if (config.role === 'admin') {
     maintainTools.register(server, engine);
-    toolCount = 21;
+    toolCount = 22;
   }
 
   logger.info('mcp', 'startup', `${toolCount} tools registered for role '${config.role}'${config.dryRun ? ' (dry-run)' : ''}`);

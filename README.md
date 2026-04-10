@@ -1,10 +1,10 @@
 # MAAD — Markdown As A Database
 
-A lightweight engine that treats markdown files as the canonical data store, builds a queryable index, and gives LLMs deterministic read/write access. SQLite is a rebuildable index — delete it and reconstruct from markdown in one pass.
+A database engine that treats markdown files as canonical records and provides deterministic read/write access through a structured interface.
 
-## Why
+Markdown remains the source of truth, while schemas and indexing make records queryable, linkable, and easier to work with programmatically.
 
-Traditional databases capture fragments — enough to run a query or generate a report, but not enough to explain *why* something happened. Markdown carries the full narrative: who, what, when, where, how, and why. MAAD indexes it so LLMs can query structure first and open full context second.
+It is designed for document-centric data where structured fields and narrative context need to live together in the same record.
 
 ## How it works
 
@@ -149,7 +149,7 @@ MCP roles control what tools an agent can use. Set via `--role` flag at server s
 
 | Role | Tools | Use case |
 |------|-------|----------|
-| `reader` (default) | scan, summary, describe, get, query, search, related, schema, aggregate, join, history, audit | Read-only agents, reporting, analysis |
+| `reader` (default) | scan, summary, describe, get, query, search, related, schema, aggregate, join, verify, history, audit | Read-only agents, reporting, analysis |
 | `writer` | reader + create, update, validate, bulk_create, bulk_update | Standard agents that read and write records |
 | `admin` | writer + delete, reindex, reload, health | Project setup, schema changes, maintenance |
 
@@ -252,6 +252,7 @@ All tools return `{ ok: true, data: {...} }` or `{ ok: false, errors: [...] }`.
 | `maad.related` | Connected documents via ref traversal |
 | `maad.aggregate` | Count/sum/avg/min/max grouped by field |
 | `maad.join` | Query + follow refs + project fields from both sides |
+| `maad.verify` | Fact-check a field value or document count against the database |
 
 ### Write
 | Tool | What it does |
