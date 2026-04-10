@@ -31,9 +31,9 @@
 
 ---
 
-## Current: v0.2.7
+## Current: v0.2.12
 
-Engine is stable and feature-complete for single-project MCP use. Skill files rewritten with archetype-driven design, `data/` directory convention, and inbox import workflow.
+Engine is stable, public, and feature-complete for single-project MCP use. Recent additions: version tracking on reads, query sort, list field index fix, summary warnings, validation messages, bulk_update batching, read-back verification, `maad.verify` fact-checking tool, grounding rules, env var config, dynamic server version. 13 reader / 18 writer / 22 admin tools.
 
 ---
 
@@ -59,9 +59,26 @@ Zero-to-operational in one agent session.
 - [ ] `maad init-project` CLI command (creates directory structure without MCP)
 - [ ] Verify deploy → architect → operational flow end-to-end
 
-### 0.4.0 — Import Workflow
+### 0.4.0 — Multi-Project Routing
 
-Recurring import of raw files into MAAD projects.
+One MCP server, multiple projects, session-bound mode. Foundation for everything multi-project.
+
+- [ ] `instance.yaml` — declares projects with name, path, role, description
+- [ ] `EnginePool` — lazy-loads engines per session, no eviction in v1
+- [ ] `SessionState` — per-connection mode + active project + whitelist
+- [ ] `maad.use_project <name>` — bind session to single mode (locked to one project)
+- [ ] `maad.use_projects [names]` — bind session to multi mode (whitelist + explicit `project=` required on every call)
+- [ ] `maad.projects` — list available projects (works pre-session)
+- [ ] `maad.current_session` — debug session state
+- [ ] `withSession()` wrapper on every project-level tool — routes to correct engine, enforces mode
+- [ ] No mid-session mode switching (end and reconnect)
+- [ ] Backward compat: `--project <path>` still works, auto-binds session to single mode
+- [ ] `--instance <path>` and `MAAD_INSTANCE` env var
+- [ ] Tool count: 4 new instance-level tools, all 22 existing tools become routable
+
+### 0.5.0 — Import Workflow
+
+Recurring import of raw files into MAADB projects. Built on multi-project routing from day one.
 
 - [ ] `_inbox/` directory convention (drop zone for raw files)
 - [ ] `_skills/import-workflow.md` — agent-guided inbox processing
@@ -71,7 +88,7 @@ Recurring import of raw files into MAAD projects.
 - [ ] Delete source from `_inbox/` after successful import
 - [ ] Test with static catalog archetype (research papers, book collection)
 
-### 0.5.0 — Provenance + Admin Tooling
+### 0.5.5 — Provenance + Admin Tooling
 
 Better visibility into what happened and why.
 
@@ -112,13 +129,14 @@ Make MAAD installable.
 
 ### 0.9.0 — Remote MCP
 
-Hosted deployment with enforced access control.
+Hosted deployment with enforced access control. Reuses the `SessionState` model built in 0.4.0 — same routing logic, keyed by HTTP session ID instead of stdio process.
 
 - [ ] HTTP/SSE transport (`StreamableHTTPServerTransport` from MCP SDK)
 - [ ] Per-connection roles (endpoint-based or token-based)
-- [ ] Concurrent read access (multiple agents, one project)
+- [ ] Concurrent read access (multiple agents, one instance)
 - [ ] Deployment guide for Docker / Azure Functions / VM
 - [ ] Roles enforced by architecture — agents can't bypass MCP when connecting over network
+- [ ] Session whitelist enables workload-aware routing at scale
 
 ### 1.0.0 — Stable Release
 
