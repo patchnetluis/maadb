@@ -1,4 +1,4 @@
-# MAAD — Markdown As A Database
+# MAADB — Markdown As A Database
 
 A database engine that treats markdown files as canonical records and provides deterministic read/write access through a structured interface.
 

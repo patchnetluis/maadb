@@ -1,4 +1,4 @@
-# MAAD Framework
+# MAADB Framework
 
 ## What MAAD Is
 
