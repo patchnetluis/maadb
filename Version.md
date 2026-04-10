@@ -1,9 +1,12 @@
 ---
 enabled: true
-current: 0.2.11
+current: 0.2.12
 ---
 
 # Version History
+
+## 0.2.12 — 2026-04-09
+maad.verify fact-checking tool (field + count modes), grounding rules in MAAD.md generator, MIT LICENSE file, .gitignore hardened, author email updated, README + FRAMEWORK synced and tightened. 13 reader / 18 writer / 22 admin tools. 266 tests passing.
 
 ## 0.2.11 — 2026-04-09
 Dynamic server version from package.json, MAAD_PROJECT/MAAD_ROLE/MAAD_PROV env var fallbacks for container deployments, OpenClaw MCP registration docs in README. 266 tests passing.
