@@ -4,47 +4,54 @@
 
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { MaadEngine } from '../../engine.js';
 import { docId } from '../../types.js';
 import { resultToResponse, successResponse, getProvenanceMode } from '../response.js';
 import { isDryRun, dryRunResponse, auditToolCall } from '../guardrails.js';
+import type { InstanceCtx } from '../ctx.js';
+import { withEngine } from '../with-session.js';
 
-export function register(server: McpServer, engine: MaadEngine): void {
+export function register(server: McpServer, ctx: InstanceCtx): void {
   server.registerTool('maad_delete', {
     description: 'Deletes a record. Soft: renames file with _deleted prefix. Hard: removes file entirely.',
     inputSchema: z.object({
       docId: z.string().describe('Document ID to delete'),
       mode: z.enum(['soft', 'hard']).default('soft').describe('soft=rename, hard=remove file'),
+      project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
-  }, async (args) => {
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_delete', args, async ({ engine }) => {
     auditToolCall('maad_delete', args);
     if (isDryRun()) return dryRunResponse('maad_delete', args);
     return resultToResponse(await engine.deleteDocument(docId(args.docId), args.mode));
-  });
+  }));
 
   server.registerTool('maad_reindex', {
     description: 'Rebuilds the SQLite index from markdown files. Use after external file changes or to recover from stale state.',
     inputSchema: z.object({
       force: z.boolean().optional().default(false).describe('Force full rebuild (skip hash check)'),
+      project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
-  }, async (args) => {
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_reindex', args, async ({ engine }) => {
     return resultToResponse(await engine.reindex({ force: args.force }));
-  });
+  }));
 
   server.registerTool('maad_reload', {
     description: 'Reloads the engine — picks up new registry, schemas, and type directories without restarting the server. Use after changing _registry/ or _schema/ files.',
-    inputSchema: z.object({}),
-  }, async () => {
+    inputSchema: z.object({
+      project: z.string().optional().describe('Project name (multi-project mode only)'),
+    }),
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_reload', args, async ({ engine }) => {
     auditToolCall('maad_reload', {});
     return resultToResponse(await engine.reload());
-  });
+  }));
 
   server.registerTool('maad_health', {
     description: 'Returns engine health status: initialized, read-only mode, git availability, document count, last indexed timestamp, provenance mode, recovery actions.',
-    inputSchema: z.object({}),
-  }, () => {
+    inputSchema: z.object({
+      project: z.string().optional().describe('Project name (multi-project mode only)'),
+    }),
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_health', args, ({ engine }) => {
     const health = engine.health();
     const provMode = getProvenanceMode();
     return successResponse({ ...health, provenance: provMode }, 'maad_health');
-  });
+  }));
 }

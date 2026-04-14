@@ -31,9 +31,9 @@
 
 ---
 
-## Current: v0.2.12
+## Current: v0.2.13
 
-Engine is stable, public, and feature-complete for single-project MCP use. Recent additions: version tracking on reads, query sort, list field index fix, summary warnings, validation messages, bulk_update batching, read-back verification, `maad_verify` fact-checking tool, grounding rules, env var config, dynamic server version. 13 reader / 18 writer / 22 admin tools.
+Engine is stable, public, and feature-complete for single-project MCP use. Recent additions: version tracking on reads, query sort, list field index fix, summary warnings, validation messages, bulk_update batching, read-back verification, `maad_verify` fact-checking tool, grounding rules, env var config, dynamic server version, empty-project boot + tool name rename. 13 reader / 18 writer / 22 admin tools.
 
 ---
 
@@ -49,19 +49,9 @@ Prove the engine works across models and use cases with real data.
 - [ ] Benchmark: token usage, call count, accuracy on structured tasks
 - [ ] Test the Architect skill end-to-end: vague prompt → working database
 
-### 0.3.5 — Deployment Workflow
-
-Zero-to-operational in one agent session.
-
-- [ ] `_skills/deploy.md` — agent-guided project setup (prerequisites, scaffolding, MCP config, Architect handoff)
-- [ ] README deployment section validated against fresh installs
-- [ ] Platform-specific MCP config generation (Claude Code, Claude Desktop, generic stdio)
-- [ ] `maad init-project` CLI command (creates directory structure without MCP)
-- [ ] Verify deploy → architect → operational flow end-to-end
-
 ### 0.4.0 — Multi-Project Routing
 
-One MCP server, multiple projects, session-bound mode. Foundation for everything multi-project. Inherits the 0.2.13 empty-project bootstrap: each pooled engine self-heals via `engine.init()` and `ensureProjectSkills()` runs per project on first bind, so `maad_use_project` works against empty directories without any manual init step.
+One MCP server, multiple projects, session-bound mode. Foundation for everything multi-project and for remote MCP (0.9.0). Inherits the 0.2.13 empty-project bootstrap: each pooled engine self-heals via `engine.init()` and `ensureProjectSkills()` runs per project on first bind, so `maad_use_project` works against empty directories without any manual init step.
 
 - [ ] `instance.yaml` — declares projects with name, path, role, description
 - [ ] `EnginePool` — lazy-loads engines per session, no eviction in v1
@@ -75,6 +65,17 @@ One MCP server, multiple projects, session-bound mode. Foundation for everything
 - [ ] Backward compat: `--project <path>` still works, auto-binds session to single mode
 - [ ] `--instance <path>` and `MAAD_INSTANCE` env var
 - [ ] Tool count: 4 new instance-level tools, all 22 existing tools become routable
+
+### 0.4.5 — Deployment Workflow
+
+Zero-to-operational in one agent session. Builds on 0.4.0 — deploy skill and CLI teach the instance model natively instead of single-project paths.
+
+- [ ] `_skills/deploy.md` — agent-guided instance setup (prerequisites, scaffolding, `instance.yaml`, MCP config, Architect handoff per project)
+- [ ] README deployment section validated against fresh installs (instance-first)
+- [ ] Platform-specific MCP config generation (Claude Code, Claude Desktop, generic stdio) — emits instance-mode configs by default, single-project as fallback
+- [ ] `maad init-instance` CLI command — scaffolds `instance.yaml` and directory layout
+- [ ] `maad add-project <name> <path>` CLI command — appends to `instance.yaml`, creates project dir if missing
+- [ ] Verify deploy → `maad_use_project` → architect → operational flow end-to-end
 
 ### 0.5.0 — Import Workflow
 

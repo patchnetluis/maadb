@@ -1,11 +1,18 @@
 node_modules/
 dist/
-_backend/
 .claude/
 CLAUDE.md
 MAAD.md
 .env
 .env.*
+
+# MAAD engine artifacts — created if the engine is ever pointed at this repo root.
+# The source repo is not itself a MAAD project; these should never be tracked.
+_backend/
+_registry/
+_schema/
+_skills/
+_import/
 
 # OS files
 .DS_Store
@@ -17,3 +24,6 @@ tests/fixtures/_temp-*/
 
 # Internal dev log — local only, public release notes live in GitHub Releases
 CHANGELOG.md
+
+# Local scratch (instance configs, throwaway data)
+scratch/

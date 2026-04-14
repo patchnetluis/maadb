@@ -61,10 +61,10 @@ export async function startupEngine(projectRoot: string): Promise<StartupResult>
   return { engine, warnings };
 }
 
-export function registerShutdownHooks(engine: MaadEngine, cleanup?: () => Promise<void>): void {
+export function registerShutdownHooks(engine: MaadEngine | null, cleanup?: () => Promise<void>): void {
   const shutdown = async () => {
     logger.info('lifecycle', 'shutdown', 'Shutting down...');
-    engine.close();
+    if (engine) engine.close();
     if (cleanup) await cleanup();
     process.exit(0);
   };

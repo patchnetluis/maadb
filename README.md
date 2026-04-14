@@ -127,6 +127,7 @@ node /path/to/maad/dist/cli.js --project /path/to/project serve --role <reader|w
 | Variable | Equivalent flag | Example |
 |----------|----------------|---------|
 | `MAAD_PROJECT` | `--project` | `/data/my-project` |
+| `MAAD_INSTANCE` | `--instance` | `/data/instance.yaml` |
 | `MAAD_ROLE` | `--role` | `admin` |
 | `MAAD_PROV` | `--prov` | `on` |
 
@@ -134,7 +135,7 @@ Flags take precedence over env vars. Env vars take precedence over defaults.
 
 ### Step 4 — Connect and build
 
-After wiring MCP, restart your agent session. The agent will see `maad.*` tools. From there:
+After wiring MCP, restart your agent session. The agent will see `maad_*` tools. From there:
 
 1. Agent reads `MAAD.md` → sees this is a MAAD project
 2. Agent runs `maad_summary` → detects empty project
@@ -152,6 +153,8 @@ MCP roles control what tools an agent can use. Set via `--role` flag at server s
 | `reader` (default) | scan, summary, describe, get, query, search, related, schema, aggregate, join, verify, history, audit | Read-only agents, reporting, analysis |
 | `writer` | reader + create, update, validate, bulk_create, bulk_update | Standard agents that read and write records |
 | `admin` | writer + delete, reindex, reload, health | Project setup, schema changes, maintenance |
+
+In multi-project mode (`--instance`), 4 additional session tools are always available pre-bind: `maad_projects`, `maad_use_project`, `maad_use_projects`, `maad_current_session`.
 
 ### Recommended workflow
 
@@ -180,7 +183,9 @@ Each agent gets its own MCP config pointing at the same project with the appropr
 
 ### Multiple projects
 
-Each project gets its own MCP server. No cross-project routing — projects are independent.
+Two options. Single-project: one MCP server per project (works today). Multi-project: one server, many projects, session-bound routing via `instance.yaml` (since 0.4.0).
+
+**Single-project (per project, scoped role):**
 
 ```json
 {
@@ -196,6 +201,29 @@ Each project gets its own MCP server. No cross-project routing — projects are 
   }
 }
 ```
+
+**Multi-project (one server, whitelist per session):**
+
+```yaml
+# instance.yaml
+name: my-instance
+projects:
+  - { name: crm,      path: /path/to/crm,      role: admin }
+  - { name: research, path: /path/to/research, role: writer }
+```
+
+```json
+{
+  "mcpServers": {
+    "maad": {
+      "command": "node",
+      "args": ["...", "--instance", "/path/to/instance.yaml", "serve"]
+    }
+  }
+}
+```
+
+Agents call `maad_use_project <name>` (single mode) or `maad_use_projects [names...]` (multi mode) once per session before other tools. See [the 0.4.0 spec](docs/specs/0.4.0-multi-project-routing.md) for the routing model.
 
 ## Project Layout
 
@@ -284,22 +312,22 @@ All tools return `{ ok: true, data: {...} }` or `{ ok: false, errors: [...] }`.
 
 - TypeScript strict, Node.js 22+ (tested on v24)
 - 4 production dependencies: `better-sqlite3`, `gray-matter`, `simple-git`, `@modelcontextprotocol/sdk`
-- 266 tests, Vitest
+- 323 tests, Vitest
 - See [FRAMEWORK.md](FRAMEWORK.md) for data doctrine, tier model, and engine design principles
 
 ## Current State
 
-**v0.2.10** — MCP server live, query projection, aggregation, cross-ref joins, bulk ops, provenance flag, read-back verification, summary warnings, env var config. 266 tests passing.
+**v0.4.0** — Multi-project routing: one MCP server serves many MAAD projects via `instance.yaml`. Sessions bind to a project (single mode) or whitelist (multi mode) with per-project roles and optional session-level downgrade. Backward-compatible: `--project --role` still works as a synthetic single-project instance with auto-bind. 4 new instance-level tools (`maad_projects`, `maad_use_project`, `maad_use_projects`, `maad_current_session`). 323 tests passing.
 
 ## Roadmap
 
 | Version | What |
 |---------|------|
 | ~~0.2.x~~ | ~~MCP server, production hardening, read path improvements~~ — **shipped** |
-| 0.3.0 | LLM evaluation — benchmarks, multi-model testing |
-| 0.3.5 | Deployment workflow — deploy skill, scaffolding, MCP config generation |
-| 0.4.0 | Import workflow — inbox pattern, duplicate detection, readonly types |
-| 0.5.0 | Provenance + admin tooling |
+| ~~0.4.0~~ | ~~Multi-project routing — one MCP, many projects, session-bound mode~~ — **shipped** |
+| 0.4.5 | Deployment workflow — deploy skill, scaffolding, MCP config generation |
+| 0.5.0 | Import workflow — inbox pattern, duplicate detection, readonly types |
+| 0.5.5 | Provenance + admin tooling |
 | 0.6.0 | Query power — FTS5, fuzzy entity matching |
 | 0.7.0 | Object attributes — user-defined tags, YAML-stored |
 | 0.8.0 | npm package prep |

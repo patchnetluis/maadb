@@ -16,21 +16,35 @@ import { startServer } from '../mcp/server.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Parse --project flag (env var MAAD_PROJECT as fallback)
+// Parse --project / --instance flags (env vars MAAD_PROJECT / MAAD_INSTANCE as fallbacks).
+// --project and --instance are mutually exclusive. If neither is supplied, `serve` errors out;
+// other commands still default --project to cwd for backward compatibility.
 const rawArgs = process.argv.slice(2);
-let projectRoot = process.env['MAAD_PROJECT'] ?? '.';
+let projectRoot = process.env['MAAD_PROJECT'];
+let instancePath: string | undefined = process.env['MAAD_INSTANCE'];
 const args: string[] = [];
 
 for (let i = 0; i < rawArgs.length; i++) {
   if (rawArgs[i] === '--project' && rawArgs[i + 1]) {
     projectRoot = rawArgs[i + 1]!;
     i++;
+  } else if (rawArgs[i] === '--instance' && rawArgs[i + 1]) {
+    instancePath = rawArgs[i + 1]!;
+    i++;
   } else {
     args.push(rawArgs[i]!);
   }
 }
 
-const ctx: CliContext = { args, projectRoot, __dirname };
+if (projectRoot && instancePath) {
+  console.error('Error: --project and --instance are mutually exclusive.');
+  process.exit(1);
+}
+
+// Non-serve commands still need a default project when neither flag is set.
+if (!projectRoot && !instancePath) projectRoot = '.';
+
+const ctx: CliContext = { args, projectRoot: projectRoot ?? '.', __dirname };
 const command = args[0];
 
 async function main(): Promise<void> {
@@ -89,12 +103,24 @@ async function cmdServe(): Promise<void> {
     }
   }
 
-  await startServer({
-    projectRoot: path.resolve(projectRoot),
-    role,
-    dryRun,
-    provenance,
-  });
+  if (instancePath) {
+    await startServer({
+      instancePath: path.resolve(instancePath),
+      role,
+      dryRun,
+      provenance,
+    });
+  } else if (projectRoot) {
+    await startServer({
+      projectRoot: path.resolve(projectRoot),
+      role,
+      dryRun,
+      provenance,
+    });
+  } else {
+    console.error('Error: `serve` requires --project <dir> or --instance <path>.');
+    process.exit(1);
+  }
 }
 
 function printHelp(): void {
@@ -123,13 +149,15 @@ Commands:
   serve [--role reader|writer|admin] [--prov off|on|detail] Start MCP server
 
 Options:
-  --project <dir>                   Set project root (default: cwd)
-  --role <role>                     MCP server role (default: reader)
+  --project <dir>                   Single-project mode (default for CLI cmds: cwd)
+  --instance <path>                 Multi-project mode: path to instance.yaml (serve only)
+  --role <role>                     MCP server role in single-project mode (default: reader)
   --force                           Force full reindex (skip hash check)
   --help                            Show this help
 
 Environment Variables:
   MAAD_PROJECT                      Project root (fallback for --project)
+  MAAD_INSTANCE                     Path to instance.yaml (fallback for --instance)
   MAAD_ROLE                         Server role (fallback for --role)
   MAAD_PROV                         Provenance mode (fallback for --prov)
 `);

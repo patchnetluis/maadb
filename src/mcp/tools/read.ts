@@ -1,14 +1,16 @@
 // ============================================================================
-// Read tools — maad_get, maad_query, maad_search, maad_related, maad_schema
+// Read tools — maad_get, maad_query, maad_search, maad_related, maad_schema,
+//              maad_aggregate, maad_verify, maad_join
 // ============================================================================
 
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { MaadEngine } from '../../engine.js';
 import { docId, docType, type ObjectQuery } from '../../types.js';
 import { resultToResponse } from '../response.js';
+import type { InstanceCtx } from '../ctx.js';
+import { withEngine } from '../with-session.js';
 
-export function register(server: McpServer, engine: MaadEngine): void {
+export function register(server: McpServer, ctx: InstanceCtx): void {
   server.registerTool('maad_get', {
     description: 'Reads a markdown-backed record at increasing depth: hot (frontmatter), warm (+block), cold (full body), full (resolved refs+objects+related, provisional composite).',
     inputSchema: z.object({
@@ -16,13 +18,14 @@ export function register(server: McpServer, engine: MaadEngine): void {
       depth: z.enum(['hot', 'warm', 'cold', 'full']).default('hot')
         .describe('hot=frontmatter, warm=+block, cold=full body, full=resolved refs+objects+related'),
       block: z.string().optional().describe('Block ID or heading (warm depth only)'),
+      project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
-  }, async (args) => {
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_get', args, async ({ engine }) => {
     if (args.depth === 'full') {
       return resultToResponse(await engine.getDocumentFull(docId(args.docId)), 'maad_get');
     }
     return resultToResponse(await engine.getDocument(docId(args.docId), args.depth, args.block ?? undefined), 'maad_get');
-  });
+  }));
 
   server.registerTool('maad_query', {
     description: 'Finds documents by type with optional field filters and projection. Filters support operators: eq, neq, gt, gte, lt, lte (dates as ISO strings work for ranges), in, contains. Use fields to return frontmatter values instead of just IDs.',
@@ -34,8 +37,9 @@ export function register(server: McpServer, engine: MaadEngine): void {
       sortOrder: z.enum(['asc', 'desc']).optional().describe('Sort direction (default desc)'),
       limit: z.number().optional().describe('Max results (default 50)'),
       offset: z.number().optional().describe('Skip first N results'),
+      project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
-  }, (args) => {
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_query', args, ({ engine }) => {
     const query: import('../../types.js').DocumentQuery = { docType: docType(args.docType) };
     if (args.filters !== undefined) query.filters = args.filters as any;
     if (args.fields !== undefined) query.fields = args.fields;
@@ -44,7 +48,7 @@ export function register(server: McpServer, engine: MaadEngine): void {
     if (args.limit !== undefined) query.limit = args.limit;
     if (args.offset !== undefined) query.offset = args.offset;
     return resultToResponse(engine.findDocuments(query), 'maad_query');
-  });
+  }));
 
   server.registerTool('maad_search', {
     description: 'Searches extracted objects across all documents. Filter by primitive + optional subtype, then narrow with query (substring) or value (exact). Without query or value, returns ALL objects matching primitive/subtype.',
@@ -57,8 +61,9 @@ export function register(server: McpServer, engine: MaadEngine): void {
       docId: z.string().optional().describe('Scope search to a single document'),
       limit: z.number().optional().describe('Max results (default 50)'),
       offset: z.number().optional().describe('Skip first N results'),
+      project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
-  }, (args) => {
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_search', args, ({ engine }) => {
     const query: ObjectQuery = { primitive: args.primitive as any };
     if (args.subtype !== undefined) query.subtype = args.subtype;
     if (args.value !== undefined) query.value = args.value;
@@ -68,7 +73,7 @@ export function register(server: McpServer, engine: MaadEngine): void {
     if (args.limit !== undefined) query.limit = args.limit;
     if (args.offset !== undefined) query.offset = args.offset;
     return resultToResponse(engine.searchObjects(query), 'maad_search');
-  });
+  }));
 
   server.registerTool('maad_related', {
     description: 'Returns documents connected to a given doc via ref fields.',
@@ -76,19 +81,21 @@ export function register(server: McpServer, engine: MaadEngine): void {
       docId: z.string().describe('Document ID'),
       direction: z.enum(['outgoing', 'incoming', 'both']).default('both')
         .describe('outgoing=docs this references, incoming=docs that reference this, both=all'),
+      project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
-  }, (args) => {
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_related', args, ({ engine }) => {
     return resultToResponse(engine.listRelated(docId(args.docId), args.direction), 'maad_related');
-  });
+  }));
 
   server.registerTool('maad_schema', {
     description: 'Returns field definitions, required fields, enum values, ID prefix, and format hints for a type. Use before create/update to know what fields to pass and how to format values.',
     inputSchema: z.object({
       docType: z.string().describe('Document type'),
+      project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
-  }, (args) => {
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_schema', args, ({ engine }) => {
     return resultToResponse(engine.schemaInfo(docType(args.docType)), 'maad_schema');
-  });
+  }));
 
   server.registerTool('maad_aggregate', {
     description: 'Groups documents by a field and optionally computes a metric (count/sum/avg/min/max) on another field. Examples: count cases by status, sum claim_amount by attorney, avg amount by year.',
@@ -101,8 +108,9 @@ export function register(server: McpServer, engine: MaadEngine): void {
       }).optional().describe('Optional metric to compute per group. Without this, returns count per group value.'),
       filters: z.any().optional().describe('Field filters (same format as maad_query filters)'),
       limit: z.number().optional().describe('Max groups to return (default 50)'),
+      project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
-  }, (args) => {
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_aggregate', args, ({ engine }) => {
     const query: import('../../engine/types.js').AggregateQuery = {
       groupBy: args.groupBy,
     };
@@ -111,7 +119,7 @@ export function register(server: McpServer, engine: MaadEngine): void {
     if (args.filters !== undefined) query.filters = args.filters as any;
     if (args.limit !== undefined) query.limit = args.limit;
     return resultToResponse(engine.aggregate(query), 'maad_aggregate');
-  });
+  }));
 
   server.registerTool('maad_verify', {
     description: 'Fact-check a claim against the database. Two modes: (1) field — verify a specific field value on a document, (2) count — verify a document count for a type with optional filters. Use this BEFORE stating any number, date, amount, or count as fact.',
@@ -123,8 +131,9 @@ export function register(server: McpServer, engine: MaadEngine): void {
       docType: z.string().optional().describe('Document type (required for count mode)'),
       expectedCount: z.number().optional().describe('Expected document count (required for count mode)'),
       filters: z.any().optional().describe('Field filters for count mode (same format as maad_query)'),
+      project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
-  }, async (args) => {
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_verify', args, async ({ engine }) => {
     if (args.mode === 'field') {
       if (!args.docId || !args.field || args.expected === undefined) {
         return resultToResponse({ ok: false, errors: [{ code: 'INVALID_ARGS', message: 'field mode requires docId, field, and expected' }] } as any, 'maad_verify');
@@ -138,7 +147,7 @@ export function register(server: McpServer, engine: MaadEngine): void {
       return resultToResponse(engine.verifyCount(docType(args.docType), args.expectedCount, args.filters as any), 'maad_verify');
     }
     return resultToResponse({ ok: false, errors: [{ code: 'INVALID_ARGS', message: 'mode must be "field" or "count"' }] } as any, 'maad_verify');
-  });
+  }));
 
   server.registerTool('maad_join', {
     description: 'Queries documents and follows ref fields to return projected fields from both source and target records in one call. Eliminates N+1 round-trips. Example: all cases with their client name and attorney name.',
@@ -150,8 +159,9 @@ export function register(server: McpServer, engine: MaadEngine): void {
       filters: z.any().optional().describe('Field filters on source documents (same format as maad_query)'),
       limit: z.number().optional().describe('Max results (default 50)'),
       offset: z.number().optional().describe('Skip first N results'),
+      project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
-  }, (args) => {
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_join', args, ({ engine }) => {
     const query: import('../../engine/types.js').JoinQuery = {
       docType: docType(args.docType),
       refs: args.refs,
@@ -162,5 +172,5 @@ export function register(server: McpServer, engine: MaadEngine): void {
     if (args.limit !== undefined) query.limit = args.limit;
     if (args.offset !== undefined) query.offset = args.offset;
     return resultToResponse(engine.join(query), 'maad_join');
-  });
+  }));
 }

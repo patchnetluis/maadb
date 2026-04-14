@@ -5,18 +5,20 @@
 import { z } from 'zod';
 import path from 'node:path';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { MaadEngine } from '../../engine.js';
 import { scanFile, scanDirectory } from '../../scanner.js';
 import { successResponse, errorResponse, getProvenanceMode } from '../response.js';
 import { isContainedIn } from '../../engine/pathguard.js';
+import type { InstanceCtx } from '../ctx.js';
+import { withEngine } from '../with-session.js';
 
-export function register(server: McpServer, engine: MaadEngine, projectRoot: string): void {
+export function register(server: McpServer, ctx: InstanceCtx): void {
   server.registerTool('maad_scan', {
     description: 'Analyze raw markdown structure. Works without registry. Use for onboarding new files. Pass a file path for detailed analysis or a directory for corpus-level patterns.',
     inputSchema: z.object({
       path: z.string().describe('File or directory path to scan (relative to project root)'),
+      project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
-  }, async (args) => {
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_scan', args, async ({ projectRoot }) => {
     const absTarget = path.resolve(projectRoot, args.path);
     if (!isContainedIn(absTarget, projectRoot)) {
       return errorResponse([{ code: 'PATH_OUTSIDE_PROJECT', message: `Scan path must be within the project root: ${args.path}` } as any]);
@@ -35,12 +37,14 @@ export function register(server: McpServer, engine: MaadEngine, projectRoot: str
     } else {
       return successResponse(await scanDirectory(absTarget));
     }
-  });
+  }));
 
   server.registerTool('maad_summary', {
     description: 'Returns the live indexed project snapshot for session bootstrapping. Use this first every session. Returns types, counts, sample IDs, and object inventory.',
-    inputSchema: z.object({}),
-  }, () => {
+    inputSchema: z.object({
+      project: z.string().optional().describe('Project name (multi-project mode only)'),
+    }),
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_summary', args, ({ engine }) => {
     const summary = engine.summary();
     const provMode = getProvenanceMode();
 
@@ -73,12 +77,14 @@ export function register(server: McpServer, engine: MaadEngine, projectRoot: str
         };
 
     return successResponse({ ...summary, provenance: provenanceInstructions }, 'maad_summary');
-  });
+  }));
 
   server.registerTool('maad_describe', {
     description: 'Returns registry types, extraction primitives, and document counts.',
-    inputSchema: z.object({}),
-  }, () => {
+    inputSchema: z.object({
+      project: z.string().optional().describe('Project name (multi-project mode only)'),
+    }),
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_describe', args, ({ engine }) => {
     return successResponse(engine.describe());
-  });
+  }));
 }

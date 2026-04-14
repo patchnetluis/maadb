@@ -1,9 +1,12 @@
 ---
 enabled: true
-current: 0.2.13
+current: 0.4.0
 ---
 
 # Version History
+
+## 0.4.0 — 2026-04-14
+Multi-project routing: one MCP server, many MAAD projects via `instance.yaml`. Sessions bind to a project (single mode) or whitelist (multi mode) with per-project roles and optional session-level downgrade (`as: reader`). Backward-compatible: `--project --role` still works as a synthetic single-project instance with auto-bind. New: `EnginePool` with eviction seam (policy deferred to 0.9.0), `SessionRegistry` keyed by MCP-SDK session IDs (HTTP/SSE-ready), 4 instance-level tools (`maad_projects`, `maad_use_project`, `maad_use_projects`, `maad_current_session`), `withSession` routing helper. Tool schemas gained an optional `project` field (additive). README and ROADMAP updated. Spec at `docs/specs/0.4.0-multi-project-routing.md`. 57 new tests, 323 total passing.
 
 ## 0.2.13 — 2026-04-10
 **Breaking:** MCP tool names renamed from `maad.<tool>` to `maad_<tool>` for Anthropic/OpenAI tool-name regex conformance (`^[a-zA-Z0-9_-]{1,64}$`). The dot-separated form was rejected by Claude Desktop and any downstream LLM provider that validates tool definitions. All 22 tools and 5 planned tools (ROADMAP) flipped to underscore: `maad_summary`, `maad_get`, `maad_bulk_create`, etc. Pre-1.0 breaking change. Agent prompts and external automations pinned to the old dotted names need updating.
@@ -69,10 +72,11 @@ Initial engine build. Parser, registry, schema, extractor (11 primitives), SQLit
 
 ## Planned
 
-- **0.2.6** — Bug fixes: ref field query filtering, aggregate totalMetric, `maad connect` CLI command, Architect requires admin role warning
-- **0.3.0** — LLM evaluation: maadb-demo benchmark execution (MAAD vs Direct), evaluation framework
-- **0.4.0** — Query power: FTS5, fuzzy entity matching with confidence scores
-- **0.5.0** — Object attributes: user-defined tags on extracted objects, stored as YAML, indexed on reindex
-- **0.6.0** — Multi-project MCP: single server routing to multiple MAAD projects, cross-project queries
-- **0.7.0** — npm package prep: API surface decisions, exports, bin config, peer deps
-- **1.0.0** — Stable release: API locked, npm published, documentation complete
+- **0.4.5** — Deployment workflow: `_skills/deploy.md`, `maad init-instance` + `maad add-project` CLI, platform-specific MCP config generation teaching the instance model
+- **0.5.0** — Import workflow: `_inbox/` convention, source tracking (`source_file`, `source_hash`), duplicate detection, readonly type flag
+- **0.5.5** — Provenance refinement + admin dashboard tool + `maad_export`
+- **0.6.0** — Query power: FTS5, fuzzy entity matching, compound filters (AND/OR), cursor-based pagination
+- **0.7.0** — Object attributes: user-defined tags on extracted objects, stored as YAML, indexed on reindex
+- **0.8.0** — npm package prep: `npx maad serve`, published to npm, MCP configs simplify to `npx maad`
+- **0.9.0** — Remote MCP: HTTP/SSE transport (`StreamableHTTPServerTransport`), per-connection roles, concurrent read access, EnginePool eviction policy activation
+- **1.0.0** — Stable release: API locked, npm published, full test coverage, migration guide

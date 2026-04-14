@@ -34,3 +34,24 @@ export function parseRole(raw: string | undefined): Role {
   if (raw === 'reader' || raw === 'writer' || raw === 'admin') return raw;
   return 'reader'; // default: least privilege
 }
+
+const ROLE_RANK: Record<Role, number> = { reader: 0, writer: 1, admin: 2 };
+
+// Returns true if `have` satisfies at least the level of `need`.
+export function roleSatisfies(have: Role, need: Role): boolean {
+  return ROLE_RANK[have] >= ROLE_RANK[need];
+}
+
+// Returns the more restrictive of two roles.
+export function minRole(a: Role, b: Role): Role {
+  return ROLE_RANK[a] <= ROLE_RANK[b] ? a : b;
+}
+
+// Inverse of getToolsForRole: for a given tool name, what's the minimum role
+// that can call it? Returns null for unknown tools.
+export function getMinRoleForTool(toolName: string): Role | null {
+  if ((READER_TOOLS as readonly string[]).includes(toolName)) return 'reader';
+  if ((WRITER_TOOLS as readonly string[]).includes(toolName)) return 'writer';
+  if ((ADMIN_TOOLS as readonly string[]).includes(toolName)) return 'admin';
+  return null;
+}
