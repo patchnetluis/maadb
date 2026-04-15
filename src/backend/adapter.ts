@@ -47,6 +47,17 @@ export interface MaadBackend {
   // Aggregation queries
   aggregate(query: import('../engine/types.js').AggregateQuery): import('../engine/types.js').AggregateResult;
 
+  // Changes-since polling delta (0.5.0 R5). Strict deterministic order:
+  // (updated_at ASC, doc_id ASC). `cursor` is the exclusive lower bound —
+  // returns rows with (updated_at, doc_id) > (cursor.updatedAt, cursor.docId).
+  // Excludes deleted rows. Emits `operation = 'create'` when version = 1 and
+  // `'update'` otherwise. Deletes are not emitted (see spec §maad_changes_since).
+  listChangesSince(opts: {
+    cursor: import('../engine/types.js').ChangesSinceParsedCursor | null;
+    limit: number;
+    docTypes?: string[] | undefined;
+  }): Array<{ docId: string; docType: string; updatedAt: string; version: number }>;
+
   // Aggregation
   getSubtypeInventory(limit: number): Array<{ primitive: string; subtype: string; count: number; topValues: string[] }>;
   getSampleDocIds(docType: DocType, limit: number): DocId[];

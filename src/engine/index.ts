@@ -444,6 +444,7 @@ export class MaadEngine {
   join(query: import('./types.js').JoinQuery) { return reads.join(this.ctx(), query); }
   async verifyField(id: DocId, field: string, expected: unknown) { return reads.verifyField(this.ctx(), id, field, expected); }
   verifyCount(dt: DocType, expectedCount: number, filters?: Record<string, import('../types.js').FilterCondition>) { return reads.verifyCount(this.ctx(), dt, expectedCount, filters); }
+  changesSince(query: import('./types.js').ChangesSinceQuery) { return reads.changesSince(this.ctx(), query); }
 
   // --- Composites (Tier 2, provisional) ---
   async getDocumentFull(id: DocId) { return composites.getDocumentFull(this.ctx(), id); }

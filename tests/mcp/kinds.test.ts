@@ -47,7 +47,7 @@ function collectRegisteredNames(register: (s: McpServer, c: InstanceCtx) => void
 
 describe('OperationKind coverage', () => {
   it('set cardinalities match the documented roster', () => {
-    expect(READ_TOOLS.size).toBe(15);
+    expect(READ_TOOLS.size).toBe(16);
     expect(WRITE_TOOLS.size).toBe(7);
     expect(ENGINE_LESS_TOOLS.size).toBe(4);
   });

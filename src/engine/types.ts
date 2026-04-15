@@ -78,6 +78,33 @@ export interface DeleteResult {
   filePath: FilePath;
 }
 
+// ---- 0.5.0 R5 — changes-since polling delta -------------------------------
+
+export interface ChangesSinceQuery {
+  cursor?: string | undefined;
+  limit?: number | undefined;
+  docTypes?: string[] | undefined;
+}
+
+export interface ChangeRecord {
+  docId: string;
+  docType: string;
+  updatedAt: string;
+  operation: 'create' | 'update';
+}
+
+export interface ChangesPage {
+  changes: ChangeRecord[];
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
+// Internal — what the backend returns before cursor encoding.
+export interface ChangesSinceParsedCursor {
+  updatedAt: string;
+  docId: string;
+}
+
 export interface FindResult {
   total: number;
   results: DocumentMatch[];

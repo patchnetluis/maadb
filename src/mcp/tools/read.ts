@@ -173,4 +173,20 @@ export function register(server: McpServer, ctx: InstanceCtx): void {
     if (args.offset !== undefined) query.offset = args.offset;
     return resultToResponse(engine.join(query), 'maad_join');
   }));
+
+  server.registerTool('maad_changes_since', {
+    description: 'Polling delta — returns documents whose updated_at (with doc_id as tiebreak) is strictly greater than the supplied cursor. Omit `cursor` to start from the beginning. Response is deterministically ordered (updated_at ASC, doc_id ASC) and paginated via `nextCursor` + `hasMore`. Cursor is opaque — pass it back verbatim. Operation is "create" (first-version rows) or "update"; deletes are not emitted in 0.5.0.',
+    inputSchema: z.object({
+      cursor: z.string().optional().describe('Opaque cursor from a previous response. Omit on first call.'),
+      limit: z.number().int().positive().optional().describe('Max changes per page (default 100, max 1000).'),
+      docTypes: z.array(z.string()).optional().describe('Filter to these document types only.'),
+      project: z.string().optional().describe('Project name (multi-project mode only)'),
+    }),
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_changes_since', args, ({ engine }) => {
+    const q: import('../../engine/types.js').ChangesSinceQuery = {};
+    if (args.cursor !== undefined) q.cursor = args.cursor;
+    if (args.limit !== undefined) q.limit = args.limit;
+    if (args.docTypes !== undefined) q.docTypes = args.docTypes;
+    return resultToResponse(engine.changesSince(q), 'maad_changes_since');
+  }));
 }

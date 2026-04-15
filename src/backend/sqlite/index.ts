@@ -409,6 +409,48 @@ export class SqliteBackend implements MaadBackend {
     return rows.map(r => toDocId(r.doc_id));
   }
 
+  listChangesSince(opts: {
+    cursor: import('../../engine/types.js').ChangesSinceParsedCursor | null;
+    limit: number;
+    docTypes?: string[] | undefined;
+  }): Array<{ docId: string; docType: string; updatedAt: string; version: number }> {
+    // Strict tuple comparison for (updated_at, doc_id) > (cursor.u, cursor.d):
+    //   updated_at > cu  OR  (updated_at = cu AND doc_id > cd)
+    const conditions: string[] = ['deleted = 0'];
+    const params: unknown[] = [];
+
+    if (opts.cursor) {
+      conditions.push('(updated_at > ? OR (updated_at = ? AND doc_id > ?))');
+      params.push(opts.cursor.updatedAt, opts.cursor.updatedAt, opts.cursor.docId);
+    }
+
+    if (opts.docTypes && opts.docTypes.length > 0) {
+      const placeholders = opts.docTypes.map(() => '?').join(', ');
+      conditions.push(`doc_type IN (${placeholders})`);
+      params.push(...opts.docTypes);
+    }
+
+    const sql =
+      `SELECT doc_id, doc_type, updated_at, version FROM documents ` +
+      `WHERE ${conditions.join(' AND ')} ` +
+      `ORDER BY updated_at ASC, doc_id ASC LIMIT ?`;
+    params.push(opts.limit);
+
+    const rows = this.db.prepare(sql).all(...params) as Array<{
+      doc_id: string;
+      doc_type: string;
+      updated_at: string;
+      version: number;
+    }>;
+
+    return rows.map(r => ({
+      docId: r.doc_id,
+      docType: r.doc_type,
+      updatedAt: r.updated_at,
+      version: r.version,
+    }));
+  }
+
   aggregate(query: AggregateQuery): AggregateResult {
     // Build a set of doc_ids scoped by docType + filters
     const scopeConditions: string[] = ['d.deleted = 0'];

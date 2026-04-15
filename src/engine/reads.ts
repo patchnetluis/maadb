@@ -34,6 +34,9 @@ import type {
   JoinQuery,
   JoinResult,
   JoinResultRow,
+  ChangesSinceQuery,
+  ChangesPage,
+  ChangesSinceParsedCursor,
 } from './types.js';
 import { readFrontmatter, readFrontmatterSync, readBlockContent } from './helpers.js';
 
@@ -393,4 +396,85 @@ export function verifyCount(
     actual,
     source: 'query',
   });
+}
+
+// ============================================================================
+// changesSince — polling delta (0.5.0 R5).
+// Strictly (updated_at, doc_id)-ordered. Cursor is opaque base64url-encoded
+// JSON {u: updatedAt, d: docId}. Omitting cursor starts from the beginning.
+// ============================================================================
+
+const DEFAULT_CHANGES_LIMIT = 100;
+const MAX_CHANGES_LIMIT = 1000;
+
+export function encodeChangesCursor(cursor: ChangesSinceParsedCursor): string {
+  const json = JSON.stringify({ u: cursor.updatedAt, d: cursor.docId });
+  return Buffer.from(json, 'utf8').toString('base64url');
+}
+
+export function decodeChangesCursor(raw: string): Result<ChangesSinceParsedCursor> {
+  let decoded: string;
+  try {
+    decoded = Buffer.from(raw, 'base64url').toString('utf8');
+  } catch {
+    return singleErr('INVALID_FIELDS', 'cursor is not valid base64url');
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(decoded);
+  } catch {
+    return singleErr('INVALID_FIELDS', 'cursor payload is not valid JSON');
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    return singleErr('INVALID_FIELDS', 'cursor payload is not an object');
+  }
+  const obj = parsed as Record<string, unknown>;
+  if (typeof obj.u !== 'string' || typeof obj.d !== 'string') {
+    return singleErr('INVALID_FIELDS', 'cursor payload missing u/d fields');
+  }
+  return ok({ updatedAt: obj.u, docId: obj.d });
+}
+
+export function changesSince(ctx: EngineContext, query: ChangesSinceQuery): Result<ChangesPage> {
+  const rawLimit = query.limit ?? DEFAULT_CHANGES_LIMIT;
+  if (!Number.isFinite(rawLimit) || rawLimit <= 0) {
+    return singleErr('INVALID_FIELDS', 'limit must be a positive integer');
+  }
+  const limit = Math.min(Math.floor(rawLimit), MAX_CHANGES_LIMIT);
+
+  let parsedCursor: ChangesSinceParsedCursor | null = null;
+  if (query.cursor !== undefined && query.cursor !== '') {
+    const result = decodeChangesCursor(query.cursor);
+    if (!result.ok) return result;
+    parsedCursor = result.value;
+  }
+
+  // Query one extra row to detect hasMore without a second round-trip.
+  const rows = ctx.backend.listChangesSince({
+    cursor: parsedCursor,
+    limit: limit + 1,
+    docTypes: query.docTypes,
+  });
+
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+
+  const changes = page.map((r) => ({
+    docId: r.docId,
+    docType: r.docType,
+    updatedAt: r.updatedAt,
+    // version == 1 → first materialization of the doc (create).
+    // version  > 1 → subsequent update. Deletes are not emitted in 0.5.0
+    // because the engine does not tombstone (see spec).
+    operation: (r.version <= 1 ? 'create' : 'update') as 'create' | 'update',
+  }));
+
+  const nextCursor = hasMore && changes.length > 0
+    ? encodeChangesCursor({
+        updatedAt: changes[changes.length - 1]!.updatedAt,
+        docId: changes[changes.length - 1]!.docId,
+      })
+    : null;
+
+  return ok({ changes, nextCursor, hasMore });
 }

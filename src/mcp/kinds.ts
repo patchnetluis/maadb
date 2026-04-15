@@ -27,6 +27,7 @@ export const READ_TOOLS: ReadonlySet<string> = new Set([
   'maad_aggregate',
   'maad_verify',
   'maad_join',
+  'maad_changes_since',
   'maad_history',
   'maad_audit',
   'maad_scan',
