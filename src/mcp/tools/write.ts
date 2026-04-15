@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { docId, docType } from '../../types.js';
 import { resultToResponse, errorResponse } from '../response.js';
+import { maadError } from '../../errors.js';
 import { isDryRun, dryRunResponse, auditToolCall } from '../guardrails.js';
 import type { InstanceCtx } from '../ctx.js';
 import { withEngine } from '../with-session.js';
@@ -16,16 +17,14 @@ import { logWriteAudit } from '../../logging.js';
 function checkWriteRate(sessionId: string, toolName: string): ReturnType<typeof errorResponse> | null {
   const rejection = getRateLimiter().tryAcquireWrite(sessionId);
   if (!rejection) return null;
-  return errorResponse([{
-    code: 'RATE_LIMITED',
-    message: `Write rate limit exceeded (${rejection.reason})`,
-    details: {
+  return errorResponse([
+    maadError('RATE_LIMITED', `Write rate limit exceeded (${rejection.reason})`, undefined, {
       reason: rejection.reason,
       limit: rejection.limit,
       retryAfterMs: rejection.retryAfterMs,
       tool: toolName,
-    },
-  } as any]);
+    }),
+  ]);
 }
 
 function parseFields(raw: unknown): Record<string, unknown> | null {
@@ -110,7 +109,7 @@ export function register(server: McpServer, ctx: InstanceCtx): void {
       auditToolCall('maad_create', args);
       if (isDryRun()) return dryRunResponse('maad_create', args);
       const fields = parseFields(args.fields);
-      if (!fields) return errorResponse([{ code: 'INVALID_FIELDS', message: 'fields must be a JSON object, not a string or array' } as any]);
+      if (!fields) return errorResponse([maadError('INVALID_FIELDS', 'fields must be a JSON object, not a string or array')]);
       const result = await engine.createDocument(
         docType(args.docType),
         fields,

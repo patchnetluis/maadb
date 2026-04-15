@@ -69,6 +69,9 @@ export async function withEngine(
   let projectForLog: string | null = null;
   let roleForLog: string | null = null;
 
+  // finalize() is called once per request, on the single return path. It
+  // attaches _meta.request_id, inspects the response body for logging, and
+  // emits the tool_call ops line.
   const finalize = (response: McpToolResponse): McpToolResponse => {
     const stamped = attachMeta(response, { request_id: requestId });
     const latencyMs = Date.now() - startedMs;
@@ -86,6 +89,7 @@ export async function withEngine(
     });
     return stamped;
   };
+
 
   // Reject new work during shutdown before any other check.
   if (isShuttingDown()) {
@@ -171,18 +175,28 @@ export async function withEngine(
     }));
 
     let timedOut = false;
-    const response = await Promise.race<McpToolResponse>([
-      handlerPromise,
-      new Promise<McpToolResponse>((resolve) => {
-        setTimeout(() => {
-          timedOut = true;
-          resolve(mcpErrorWithDetails('REQUEST_TIMEOUT',
-            `Tool ${toolName} exceeded per-request timeout of ${timeoutMs}ms`,
-            { tool: toolName, limitMs: timeoutMs },
-          ));
-        }, timeoutMs);
-      }),
-    ]);
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<McpToolResponse>((resolve) => {
+      timeoutHandle = setTimeout(() => {
+        timedOut = true;
+        resolve(mcpErrorWithDetails('REQUEST_TIMEOUT',
+          `Tool ${toolName} exceeded per-request timeout of ${timeoutMs}ms`,
+          { tool: toolName, limitMs: timeoutMs },
+        ));
+      }, timeoutMs);
+      // Don't keep the event loop alive for a pending request timer —
+      // process exit stays clean when all real work is done.
+      timeoutHandle.unref?.();
+    });
+
+    let response: McpToolResponse;
+    try {
+      response = await Promise.race<McpToolResponse>([handlerPromise, timeoutPromise]);
+    } finally {
+      // Clear the timer on the happy path so we don't keep ~30s of dead
+      // closures around per request under sustained load.
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+    }
 
     if (timedOut) {
       // Observe the handler's eventual completion and log the overrun.

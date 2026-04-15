@@ -229,8 +229,10 @@ export class MaadEngine {
     // Warm the git-clean cache so the first health() call returns real data
     // instead of null. Best-effort — a failure here falls through to null
     // and health() reports it as "unknown" rather than crashing init.
+    // Awaited (not fire-and-forget) so a caller who polls health() right
+    // after init() sees consistent data, not a null → boolean transition.
     if (this.gitLayer) {
-      void this.refreshGitClean();
+      await this.refreshGitClean();
     }
 
     return ok(undefined);
