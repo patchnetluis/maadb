@@ -12,6 +12,7 @@ const require = createRequire(import.meta.url);
 const pkg = require('../../package.json') as { version: string };
 import { setGuardrailConfig } from './guardrails.js';
 import { setProvenanceMode } from './response.js';
+import { initIdempotencyCache, readIdempotencyEnv } from './idempotency.js';
 import { registerShutdownHooks } from './lifecycle.js';
 import { logger } from '../engine/logger.js';
 import { synthesizeLegacyInstance, loadInstance, type InstanceConfig } from '../instance/config.js';
@@ -60,6 +61,7 @@ export async function startServer(opts: ServeOptions): Promise<void> {
   const provenance = opts.provenance ?? process.env.MAAD_PROV ?? 'off';
   setGuardrailConfig({ dryRun, toolAllowlist: opts.toolAllowlist });
   setProvenanceMode(provenance as any);
+  initIdempotencyCache(readIdempotencyEnv());
 
   // Build the instance-scoped runtime context
   const pool = new EnginePool(instance);
