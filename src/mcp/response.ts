@@ -20,11 +20,13 @@ interface SuccessResponse {
   ok: true;
   data: unknown;
   _source?: string;
+  _meta?: Record<string, unknown>;
 }
 
 interface ErrorResponse {
   ok: false;
   errors: Array<{ code: string; message: string; details?: Record<string, unknown> }>;
+  _meta?: Record<string, unknown>;
 }
 
 type McpResponse = SuccessResponse | ErrorResponse;
@@ -55,4 +57,28 @@ export function errorResponse(errors: MaadError[]): { content: Array<{ type: 'te
 export function resultToResponse<T>(result: Result<T>, toolName?: string): { content: Array<{ type: 'text'; text: string }> } {
   if (result.ok) return successResponse(result.value, toolName);
   return errorResponse(result.errors);
+}
+
+/**
+ * Attach or merge fields into `_meta` on an already-serialized tool response.
+ * Used by the MCP wrapper to stamp request_id onto every response so clients
+ * can quote it in bug reports. Non-breaking (MCP allows extra fields).
+ */
+export function attachMeta(
+  response: { content: Array<{ type: 'text'; text: string }> },
+  meta: Record<string, unknown>,
+): { content: Array<{ type: 'text'; text: string }> } {
+  const first = response.content[0];
+  if (!first || first.type !== 'text') return response;
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(first.text) as Record<string, unknown>;
+  } catch {
+    return response;
+  }
+
+  const existing = (parsed._meta as Record<string, unknown> | undefined) ?? {};
+  parsed._meta = { ...existing, ...meta };
+  return { content: [{ type: 'text', text: JSON.stringify(parsed) }] };
 }

@@ -3,7 +3,6 @@
 // ============================================================================
 
 import { z } from 'zod';
-import { randomUUID } from 'node:crypto';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { docId, docType } from '../../types.js';
 import { resultToResponse, errorResponse } from '../response.js';
@@ -12,6 +11,7 @@ import type { InstanceCtx } from '../ctx.js';
 import { withEngine } from '../with-session.js';
 import { withIdempotency } from '../idempotency.js';
 import { getRateLimiter } from '../rate-limit.js';
+import { logWriteAudit } from '../../logging.js';
 
 function checkWriteRate(sessionId: string, toolName: string): ReturnType<typeof errorResponse> | null {
   const rejection = getRateLimiter().tryAcquireWrite(sessionId);
@@ -38,9 +38,58 @@ function parseFields(raw: unknown): Record<string, unknown> | null {
   return null;
 }
 
-function reqId(): string {
-  // Placeholder until H6 threads real request IDs through withSession.
-  return randomUUID();
+interface AuditContext {
+  requestId: string;
+  sessionId: string;
+  projectName: string;
+  tool: string;
+  docType?: string;
+}
+
+/**
+ * Emit an audit line for a successful single-record write. Called after the
+ * engine returns `ok: true`. version_before/version_after/changed_fields come
+ * from the engine result shape. git_commit SHA is not currently threaded
+ * through the engine result — set to null for now; 0.8.5 may plumb it.
+ */
+function auditSingleWrite(
+  audit: AuditContext,
+  result: { docId?: string | unknown; version?: number; changedFields?: string[] },
+  versionBefore: number | null,
+): void {
+  logWriteAudit({
+    request_id: audit.requestId,
+    session_id: audit.sessionId,
+    project: audit.projectName,
+    tool: audit.tool,
+    doc_id: typeof result.docId === 'string' ? result.docId : String(result.docId ?? ''),
+    doc_type: audit.docType ?? null,
+    version_before: versionBefore,
+    version_after: result.version ?? null,
+    changed_fields: result.changedFields ?? [],
+    git_commit: null,
+  });
+}
+
+/** Audit a successful bulk write. */
+function auditBulkWrite(
+  audit: AuditContext,
+  result: { succeeded: Array<{ docId: string; version?: number }> },
+): void {
+  const docIds = result.succeeded.map((s) => s.docId);
+  logWriteAudit({
+    request_id: audit.requestId,
+    session_id: audit.sessionId,
+    project: audit.projectName,
+    tool: audit.tool,
+    doc_id: null,
+    doc_ids: docIds,
+    doc_type: audit.docType ?? null,
+    version_before: null,
+    version_after: null,
+    changed_fields: [],
+    git_commit: null,
+  });
 }
 
 export function register(server: McpServer, ctx: InstanceCtx): void {
@@ -54,8 +103,8 @@ export function register(server: McpServer, ctx: InstanceCtx): void {
       project: z.string().optional().describe('Project name (multi-project mode only)'),
       idempotencyKey: z.string().max(128).optional().describe('Opaque client-supplied key; scopes (project, tool, key) and dedupes retries within TTL'),
     }),
-  }, async (args, extra) => withEngine(ctx, extra, 'maad_create', args, async ({ engine, projectName, sessionId }) =>
-    withIdempotency(projectName, 'maad_create', args.idempotencyKey, reqId(), async () => {
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_create', args, async ({ engine, projectName, sessionId, requestId }) =>
+    withIdempotency(projectName, 'maad_create', args.idempotencyKey, requestId, async () => {
       const rateRejection = checkWriteRate(sessionId, 'maad_create');
       if (rateRejection) return rateRejection;
       auditToolCall('maad_create', args);
@@ -68,6 +117,13 @@ export function register(server: McpServer, ctx: InstanceCtx): void {
         args.body ?? undefined,
         args.docId ?? undefined,
       );
+      if (result.ok) {
+        auditSingleWrite(
+          { requestId, sessionId, projectName, tool: 'maad_create', docType: args.docType },
+          result.value as { docId?: unknown; version?: number; changedFields?: string[] },
+          null, // version_before: null on create
+        );
+      }
       return resultToResponse(result, 'maad_create');
     }),
   ));
@@ -83,8 +139,8 @@ export function register(server: McpServer, ctx: InstanceCtx): void {
       project: z.string().optional().describe('Project name (multi-project mode only)'),
       idempotencyKey: z.string().max(128).optional().describe('Opaque client-supplied key; scopes (project, tool, key) and dedupes retries within TTL'),
     }),
-  }, async (args, extra) => withEngine(ctx, extra, 'maad_update', args, async ({ engine, projectName, sessionId }) =>
-    withIdempotency(projectName, 'maad_update', args.idempotencyKey, reqId(), async () => {
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_update', args, async ({ engine, projectName, sessionId, requestId }) =>
+    withIdempotency(projectName, 'maad_update', args.idempotencyKey, requestId, async () => {
       const rateRejection = checkWriteRate(sessionId, 'maad_update');
       if (rateRejection) return rateRejection;
       auditToolCall('maad_update', args);
@@ -98,6 +154,15 @@ export function register(server: McpServer, ctx: InstanceCtx): void {
         args.appendBody ?? undefined,
         args.expectedVersion ?? undefined,
       );
+      if (result.ok) {
+        const value = result.value as { docId?: unknown; version?: number; changedFields?: string[] };
+        const versionBefore = typeof value.version === 'number' ? value.version - 1 : null;
+        auditSingleWrite(
+          { requestId, sessionId, projectName, tool: 'maad_update' },
+          value,
+          versionBefore,
+        );
+      }
       return resultToResponse(result, 'maad_update');
     }),
   ));
@@ -125,13 +190,22 @@ export function register(server: McpServer, ctx: InstanceCtx): void {
       project: z.string().optional().describe('Project name (multi-project mode only)'),
       idempotencyKey: z.string().max(128).optional().describe('Opaque client-supplied key; scopes (project, tool, key) and dedupes retries within TTL'),
     }),
-  }, async (args, extra) => withEngine(ctx, extra, 'maad_bulk_create', args, async ({ engine, projectName, sessionId }) =>
-    withIdempotency(projectName, 'maad_bulk_create', args.idempotencyKey, reqId(), async () => {
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_bulk_create', args, async ({ engine, projectName, sessionId, requestId }) =>
+    withIdempotency(projectName, 'maad_bulk_create', args.idempotencyKey, requestId, async () => {
       const rateRejection = checkWriteRate(sessionId, 'maad_bulk_create');
       if (rateRejection) return rateRejection;
       auditToolCall('maad_bulk_create', { count: args.records.length });
       if (isDryRun()) return dryRunResponse('maad_bulk_create', { count: args.records.length });
       const result = await engine.bulkCreate(args.records as any);
+      if (result.ok) {
+        const value = result.value as { succeeded: Array<{ docId: string; version?: number }> };
+        if (value.succeeded.length > 0) {
+          auditBulkWrite(
+            { requestId, sessionId, projectName, tool: 'maad_bulk_create' },
+            value,
+          );
+        }
+      }
       return resultToResponse(result);
     }),
   ));
@@ -148,13 +222,22 @@ export function register(server: McpServer, ctx: InstanceCtx): void {
       project: z.string().optional().describe('Project name (multi-project mode only)'),
       idempotencyKey: z.string().max(128).optional().describe('Opaque client-supplied key; scopes (project, tool, key) and dedupes retries within TTL'),
     }),
-  }, async (args, extra) => withEngine(ctx, extra, 'maad_bulk_update', args, async ({ engine, projectName, sessionId }) =>
-    withIdempotency(projectName, 'maad_bulk_update', args.idempotencyKey, reqId(), async () => {
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_bulk_update', args, async ({ engine, projectName, sessionId, requestId }) =>
+    withIdempotency(projectName, 'maad_bulk_update', args.idempotencyKey, requestId, async () => {
       const rateRejection = checkWriteRate(sessionId, 'maad_bulk_update');
       if (rateRejection) return rateRejection;
       auditToolCall('maad_bulk_update', { count: args.updates.length });
       if (isDryRun()) return dryRunResponse('maad_bulk_update', { count: args.updates.length });
       const result = await engine.bulkUpdate(args.updates as any);
+      if (result.ok) {
+        const value = result.value as { succeeded: Array<{ docId: string; version?: number }> };
+        if (value.succeeded.length > 0) {
+          auditBulkWrite(
+            { requestId, sessionId, projectName, tool: 'maad_bulk_update' },
+            value,
+          );
+        }
+      }
       return resultToResponse(result);
     }),
   ));
