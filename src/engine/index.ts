@@ -3,7 +3,7 @@
 // Holds state, delegates to domain functions via EngineContext.
 // ============================================================================
 
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, statSync, readdirSync, statfsSync } from 'node:fs';
 import path from 'node:path';
 
 import { ok, singleErr, type Result } from '../errors.js';
@@ -70,6 +70,38 @@ export interface HealthReport {
     startedAt: string;
     elapsedMs: number;
   } | null;
+  // 0.4.1 H8 extensions
+  lastWriteAt: string | null;      // ISO timestamp of last successful mutating op
+  repoSizeBytes: number | null;    // .git directory size on disk; null if git unavailable
+  gitClean: boolean | null;        // working-tree clean? null if git unavailable
+  diskHeadroomMb: number | null;   // free space on the volume holding projectRoot
+}
+
+/** Recursive dir size in bytes. Best-effort — unreadable entries are skipped. */
+function dirSizeBytes(root: string): number {
+  if (!existsSync(root)) return 0;
+  let total = 0;
+  const stack: string[] = [root];
+  while (stack.length > 0) {
+    const dir = stack.pop()!;
+    let entries: string[];
+    try {
+      entries = readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const name of entries) {
+      const full = path.join(dir, name);
+      try {
+        const s = statSync(full);
+        if (s.isDirectory()) stack.push(full);
+        else if (s.isFile()) total += s.size;
+      } catch {
+        /* skip unreadable entries */
+      }
+    }
+  }
+  return total;
 }
 
 export class MaadEngine {
@@ -87,6 +119,14 @@ export class MaadEngine {
   // FIFO. Blocks indefinitely in 0.4.1; timeout deferred to 0.8.5.
   private writeLock = new AsyncFifoMutex();
   private lastWriteOp: { op: string; startedAtMs: number } | null = null;
+  private lastWriteAt: string | null = null;
+
+  // Cached repo-size probe. Full .git walk is O(size) and can be slow on
+  // big histories; cache for 60s so consecutive maad_health calls are cheap.
+  private repoSizeCache: { bytes: number; computedAtMs: number } | null = null;
+  private static readonly REPO_SIZE_CACHE_MS = 60_000;
+  // git-status result cache; refresh() updates it, probeGitClean() reads it.
+  private lastGitCleanCache: boolean | null = null;
 
   private async runExclusive<T>(op: string, fn: () => Promise<T>): Promise<T> {
     const depthOnEnter = this.writeLock.depth();
@@ -94,7 +134,12 @@ export class MaadEngine {
     const startedAtMs = Date.now();
     this.lastWriteOp = { op, startedAtMs };
     try {
-      return await fn();
+      const result = await fn();
+      // Record last-write timestamp for health reporting. Successful and
+      // error-result writes both touch this — every mutating attempt counts
+      // as activity; a caller can cross-reference the ops log to distinguish.
+      this.lastWriteAt = new Date().toISOString();
+      return result;
     } finally {
       const elapsedMs = Date.now() - startedAtMs;
       if (elapsedMs > 500) {
@@ -180,6 +225,14 @@ export class MaadEngine {
     }
 
     this.initialized = true;
+
+    // Warm the git-clean cache so the first health() call returns real data
+    // instead of null. Best-effort — a failure here falls through to null
+    // and health() reports it as "unknown" rather than crashing init.
+    if (this.gitLayer) {
+      void this.refreshGitClean();
+    }
+
     return ok(undefined);
   }
 
@@ -220,7 +273,80 @@ export class MaadEngine {
       bootstrapHint: emptyProject ? '_skills/architect-core.md' : null,
       writeQueueDepth: this.writeLock.depth(),
       lastWriteOp,
+      lastWriteAt: this.lastWriteAt,
+      repoSizeBytes: this.probeRepoSize(),
+      gitClean: this.probeGitClean(),
+      diskHeadroomMb: this.probeDiskHeadroom(),
     };
+  }
+
+  // ---- H8 probes ------------------------------------------------------------
+
+  /**
+   * Size of the .git directory on disk, in bytes. Cached for 60s since a full
+   * recursive walk is O(size) and maad_health may be polled frequently. Returns
+   * null if git is unavailable. Best-effort: filesystem errors return null.
+   */
+  private probeRepoSize(): number | null {
+    if (!this.gitLayer) return null;
+    const nowMs = Date.now();
+    if (this.repoSizeCache && nowMs - this.repoSizeCache.computedAtMs < MaadEngine.REPO_SIZE_CACHE_MS) {
+      return this.repoSizeCache.bytes;
+    }
+    try {
+      const bytes = dirSizeBytes(path.join(this.projectRoot, '.git'));
+      this.repoSizeCache = { bytes, computedAtMs: nowMs };
+      return bytes;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Synchronous "is the working tree clean" probe. Uses simple-git's
+   * status() — fast enough for health reporting. Returns null if git is
+   * unavailable. Best-effort: errors return null.
+   *
+   * Note: simple-git's status() is async, but we cache the most recent
+   * result on a health() call so maad_health stays synchronous.
+   */
+  private probeGitClean(): boolean | null {
+    if (!this.gitLayer) return null;
+    return this.lastGitCleanCache;
+  }
+
+  /**
+   * Refresh the cached git-clean flag. Called on demand (e.g. from an async
+   * path that awaits the status) and in the background by probeGitClean
+   * fallback.
+   */
+  async refreshGitClean(): Promise<boolean | null> {
+    if (!this.gitLayer) {
+      this.lastGitCleanCache = null;
+      return null;
+    }
+    try {
+      const status = await this.gitLayer.getSimpleGit().status();
+      this.lastGitCleanCache = status.files.length === 0;
+      return this.lastGitCleanCache;
+    } catch {
+      return this.lastGitCleanCache;
+    }
+  }
+
+  /**
+   * Free space on the volume holding projectRoot, in megabytes. Uses
+   * fs.statfsSync which is available on Node 18+. Returns null on error
+   * (e.g. unsupported filesystem, permissions).
+   */
+  private probeDiskHeadroom(): number | null {
+    try {
+      const stats = statfsSync(this.projectRoot);
+      const bytes = Number(stats.bavail) * Number(stats.bsize);
+      return Math.floor(bytes / (1024 * 1024));
+    } catch {
+      return null;
+    }
   }
 
   /**
