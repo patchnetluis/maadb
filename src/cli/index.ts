@@ -87,36 +87,68 @@ async function main(): Promise<void> {
   }
 }
 
+function parseIntEnv(val: string | undefined, fallback: number): number {
+  if (val === undefined || val === '') return fallback;
+  const n = Number.parseInt(val, 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
 async function cmdServe(): Promise<void> {
   let role: string | undefined = process.env['MAAD_ROLE'];
   let dryRun = false;
   let provenance: string | undefined = process.env['MAAD_PROV'];
+  let transport: 'stdio' | 'http' = (process.env['MAAD_TRANSPORT'] as 'stdio' | 'http' | undefined) ?? 'stdio';
+  let httpHost: string = process.env['MAAD_HTTP_HOST'] ?? '127.0.0.1';
+  let httpPort: number = parseIntEnv(process.env['MAAD_HTTP_PORT'], 7733);
+  let httpMaxBody: number = parseIntEnv(process.env['MAAD_HTTP_MAX_BODY'], 1_048_576);
+  let headersTimeoutMs: number = parseIntEnv(process.env['MAAD_HTTP_HEADERS_TIMEOUT_MS'], 10_000);
+  let requestTimeoutMs: number = parseIntEnv(process.env['MAAD_HTTP_REQUEST_TIMEOUT_MS'], 60_000);
+  let keepAliveTimeoutMs: number = parseIntEnv(process.env['MAAD_HTTP_KEEPALIVE_TIMEOUT_MS'], 5_000);
+  let trustProxy: boolean = process.env['MAAD_TRUST_PROXY'] === '1' || process.env['MAAD_TRUST_PROXY'] === 'true';
+
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--role' && args[i + 1]) {
-      role = args[i + 1];
-    }
-    if (args[i] === '--dry-run') {
-      dryRun = true;
-    }
-    if (args[i] === '--prov' && args[i + 1]) {
-      provenance = args[i + 1];
-    }
+    const a = args[i];
+    const next = args[i + 1];
+    if (a === '--role' && next) role = next;
+    else if (a === '--dry-run') dryRun = true;
+    else if (a === '--prov' && next) provenance = next;
+    else if (a === '--transport' && next) transport = next as 'stdio' | 'http';
+    else if (a === '--http-host' && next) httpHost = next;
+    else if (a === '--http-port' && next) httpPort = parseIntEnv(next, httpPort);
+    else if (a === '--http-max-body' && next) httpMaxBody = parseIntEnv(next, httpMaxBody);
+    else if (a === '--http-headers-timeout' && next) headersTimeoutMs = parseIntEnv(next, headersTimeoutMs);
+    else if (a === '--http-request-timeout' && next) requestTimeoutMs = parseIntEnv(next, requestTimeoutMs);
+    else if (a === '--http-keepalive-timeout' && next) keepAliveTimeoutMs = parseIntEnv(next, keepAliveTimeoutMs);
+    else if (a === '--trust-proxy') trustProxy = true;
   }
 
+  if (transport !== 'stdio' && transport !== 'http') {
+    console.error(`Error: --transport must be 'stdio' or 'http' (got '${transport}')`);
+    process.exit(1);
+  }
+
+  const base = {
+    role,
+    dryRun,
+    provenance,
+    transport,
+    ...(transport === 'http' ? {
+      http: {
+        host: httpHost,
+        port: httpPort,
+        maxBodyBytes: httpMaxBody,
+        headersTimeoutMs,
+        requestTimeoutMs,
+        keepAliveTimeoutMs,
+        trustProxy,
+      },
+    } : {}),
+  } as const;
+
   if (instancePath) {
-    await startServer({
-      instancePath: path.resolve(instancePath),
-      role,
-      dryRun,
-      provenance,
-    });
+    await startServer({ ...base, instancePath: path.resolve(instancePath) });
   } else if (projectRoot) {
-    await startServer({
-      projectRoot: path.resolve(projectRoot),
-      role,
-      dryRun,
-      provenance,
-    });
+    await startServer({ ...base, projectRoot: path.resolve(projectRoot) });
   } else {
     console.error('Error: `serve` requires --project <dir> or --instance <path>.');
     process.exit(1);
@@ -146,7 +178,7 @@ Commands:
   parse <file.md>                   Parse a file and print the result
   history <doc_id>                  Show git history for a document
   audit [--since date]              Show project-wide activity
-  serve [--role reader|writer|admin] [--prov off|on|detail] Start MCP server
+  serve [--transport stdio|http] [--role ...] [--prov ...]  Start MCP server
 
 Options:
   --project <dir>                   Single-project mode (default for CLI cmds: cwd)
@@ -155,11 +187,29 @@ Options:
   --force                           Force full reindex (skip hash check)
   --help                            Show this help
 
+serve HTTP options (when --transport http):
+  --transport <stdio|http>          Transport selection (default: stdio)
+  --http-host <host>                Bind address (default: 127.0.0.1)
+  --http-port <port>                Bind port (default: 7733)
+  --http-max-body <bytes>           Max request body bytes (default: 1048576)
+  --http-headers-timeout <ms>       node:http headersTimeout (default: 10000)
+  --http-request-timeout <ms>       node:http requestTimeout (default: 60000)
+  --http-keepalive-timeout <ms>     node:http keepAliveTimeout (default: 5000)
+  --trust-proxy                     Use X-Forwarded-For first hop for remote IP in logs
+
 Environment Variables:
   MAAD_PROJECT                      Project root (fallback for --project)
   MAAD_INSTANCE                     Path to instance.yaml (fallback for --instance)
   MAAD_ROLE                         Server role (fallback for --role)
   MAAD_PROV                         Provenance mode (fallback for --prov)
+  MAAD_TRANSPORT                    stdio | http (default: stdio)
+  MAAD_HTTP_HOST                    HTTP bind host (default: 127.0.0.1)
+  MAAD_HTTP_PORT                    HTTP bind port (default: 7733)
+  MAAD_HTTP_MAX_BODY                HTTP max body bytes (default: 1048576)
+  MAAD_HTTP_HEADERS_TIMEOUT_MS      headersTimeout ms (default: 10000)
+  MAAD_HTTP_REQUEST_TIMEOUT_MS      requestTimeout ms (default: 60000)
+  MAAD_HTTP_KEEPALIVE_TIMEOUT_MS    keepAliveTimeout ms (default: 5000)
+  MAAD_TRUST_PROXY                  1|true to trust X-Forwarded-For (default: false)
 `);
 }
 

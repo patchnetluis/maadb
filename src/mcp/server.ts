@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { buildConfig } from './config.js';
+import { startHttpTransport, type HttpTransportHandle } from './transport/http.js';
 
 const require = createRequire(import.meta.url);
 const pkg = require('../../package.json') as { version: string };
@@ -31,6 +32,18 @@ import * as auditTools from './tools/audit.js';
 import * as maintainTools from './tools/maintain.js';
 import * as instanceTools from './tools/instance.js';
 
+export type Transport = 'stdio' | 'http';
+
+export interface HttpServeOptions {
+  host: string;
+  port: number;
+  maxBodyBytes: number;
+  headersTimeoutMs: number;
+  requestTimeoutMs: number;
+  keepAliveTimeoutMs: number;
+  trustProxy: boolean;
+}
+
 export interface ServeOptions {
   projectRoot?: string | undefined;
   instancePath?: string | undefined;
@@ -38,6 +51,8 @@ export interface ServeOptions {
   dryRun?: boolean | undefined;
   toolAllowlist?: string[] | undefined;
   provenance?: string | undefined;
+  transport?: Transport | undefined;
+  http?: HttpServeOptions | undefined;
 }
 
 export async function startServer(opts: ServeOptions): Promise<void> {
@@ -86,44 +101,74 @@ export async function startServer(opts: ServeOptions): Promise<void> {
     }
   }
 
-  // Create MCP server
-  const server = new McpServer({ name: 'maad', version: pkg.version });
-
-  // Register tools. Legacy synthetic mode keeps the 0.2.x role-tier registration
-  // (reader sees no writer tools, etc). Real instance mode registers the full
-  // superset; per-call role gating happens in withEngine.
+  // Tool registration factory. Stdio creates one server for the process.
+  // HTTP creates a fresh server per session (per SDK example pattern) — tool
+  // registration is cheap (schema only, no engine work), so the per-session
+  // cost is negligible and isolation is cleaner.
   const legacyRole = instance.source === 'synthetic' ? parseRole(opts.role) : 'admin';
 
-  // Instance-level tools are only exposed in real multi-project mode. In
-  // legacy single-project mode the session auto-binds, so use_project has
-  // no purpose and would only confuse clients.
-  let toolCount = 0;
-  if (instance.source === 'file') {
-    instanceTools.register(server, ctx);
-    toolCount += 4;
+  const buildMcpServer = (): { server: McpServer; toolCount: number } => {
+    const server = new McpServer({ name: 'maad', version: pkg.version });
+    let toolCount = 0;
+    if (instance.source === 'file') {
+      instanceTools.register(server, ctx);
+      toolCount += 4;
+    }
+    discoverTools.register(server, ctx);
+    readTools.register(server, ctx);
+    auditTools.register(server, ctx);
+    toolCount += 13;
+    if (legacyRole === 'writer' || legacyRole === 'admin') {
+      writeTools.register(server, ctx);
+      toolCount += 5;
+    }
+    if (legacyRole === 'admin') {
+      maintainTools.register(server, ctx);
+      toolCount += 4;
+    }
+    return { server, toolCount };
+  };
+
+  const transportKind: Transport = opts.transport ?? 'stdio';
+
+  if (transportKind === 'http') {
+    if (!opts.http) {
+      console.error('MAAD MCP: --transport http requires HTTP config');
+      process.exit(1);
+    }
+    // One-time registration log using a throwaway count from a probe server.
+    // In HTTP mode the real server instances are built per session.
+    const { toolCount } = buildMcpServer();
+    logger.info('mcp', 'startup',
+      `${toolCount} tools registered — instance "${instance.name}" (${instance.source}), ${instance.projects.length} project(s)${dryRun ? ' (dry-run)' : ''} [transport=http]`);
+
+    const handle: HttpTransportHandle = await startHttpTransport({
+      host: opts.http.host,
+      port: opts.http.port,
+      maxBodyBytes: opts.http.maxBodyBytes,
+      headersTimeoutMs: opts.http.headersTimeoutMs,
+      requestTimeoutMs: opts.http.requestTimeoutMs,
+      keepAliveTimeoutMs: opts.http.keepAliveTimeoutMs,
+      trustProxy: opts.http.trustProxy,
+      serverFactory: () => buildMcpServer().server,
+    });
+
+    installSignalHandlers(
+      { pool, rateLimiter: getRateLimiter() },
+      {
+        finalCleanup: async () => {
+          try { await handle.close(); } catch { /* best-effort */ }
+        },
+      },
+    );
+    return;
   }
 
-  discoverTools.register(server, ctx);
-  readTools.register(server, ctx);
-  auditTools.register(server, ctx);
-  toolCount += 13;
-
-  if (legacyRole === 'writer' || legacyRole === 'admin') {
-    writeTools.register(server, ctx);
-    toolCount += 5;
-  }
-  if (legacyRole === 'admin') {
-    maintainTools.register(server, ctx);
-    toolCount += 4;
-  }
-
+  // stdio — single server, single transport, lifetime of the process
+  const { server, toolCount } = buildMcpServer();
   logger.info('mcp', 'startup',
     `${toolCount} tools registered — instance "${instance.name}" (${instance.source}), ${instance.projects.length} project(s)${dryRun ? ' (dry-run)' : ''}`);
 
-  // Drain-aware shutdown: SIGTERM/SIGINT enter DRAINING, wait for in-flight
-  // writes to settle (bounded by MAAD_SHUTDOWN_TIMEOUT_MS, default 10s), then
-  // close the pool, run final cleanup, and exit with code 0 on clean drain
-  // or 1 on drain timeout.
   installSignalHandlers(
     { pool, rateLimiter: getRateLimiter() },
     {
@@ -133,7 +178,6 @@ export async function startServer(opts: ServeOptions): Promise<void> {
     },
   );
 
-  // Start stdio transport
   const transport = new StdioServerTransport();
   await server.connect(transport);
   logger.info('mcp', 'startup', 'Server started on stdio');
