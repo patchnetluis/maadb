@@ -40,21 +40,28 @@ export interface LoggingOptions {
 let opsLog: Logger;
 let auditLog: Logger;
 
+// Default log destination is stderr (fd 2), not stdout. In stdio MCP transport
+// mode, stdout IS the JSON-RPC channel — any non-protocol bytes written there
+// (including pino log lines) corrupt the frame stream and the client
+// disconnects. stderr is safe for both transports; HTTP operators can still
+// redirect it wherever they like.
+function defaultDestination(): DestinationStream {
+  return pino.destination({ fd: 2, sync: false });
+}
+
 function buildOps(opts: LoggingOptions): Logger {
   const level = opts.level ?? process.env.MAAD_LOG_LEVEL ?? 'info';
   if (opts.opsDestination) {
     return pino({ level, redact: { paths: REDACT_PATHS, censor: '[redacted]' } }, opts.opsDestination);
   }
-  // pino-pretty is only wired when explicitly requested; in production we want
-  // raw JSON to stdout so operators can pipe through whatever aggregator.
   if (opts.pretty ?? process.env.MAAD_LOG_PRETTY === '1') {
     return pino({
       level,
       redact: { paths: REDACT_PATHS, censor: '[redacted]' },
-      transport: { target: 'pino-pretty', options: { colorize: true } },
+      transport: { target: 'pino-pretty', options: { colorize: true, destination: 2 } },
     });
   }
-  return pino({ level, redact: { paths: REDACT_PATHS, censor: '[redacted]' } });
+  return pino({ level, redact: { paths: REDACT_PATHS, censor: '[redacted]' } }, defaultDestination());
 }
 
 function buildAudit(opts: LoggingOptions): Logger {
@@ -69,8 +76,7 @@ function buildAudit(opts: LoggingOptions): Logger {
     const stream = createWriteStream(auditPath, { flags: 'a' });
     return pino({ level, base: { channel: 'audit' } }, stream);
   }
-  // Fall through to stdout with channel tag so operators can grep/split later.
-  return pino({ level, base: { channel: 'audit' } });
+  return pino({ level, base: { channel: 'audit' } }, defaultDestination());
 }
 
 export function initLogging(opts: LoggingOptions = {}): void {
