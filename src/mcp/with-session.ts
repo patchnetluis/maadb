@@ -24,6 +24,7 @@ import { errorResponse, attachMeta } from './response.js';
 import { getRateLimiter } from './rate-limit.js';
 import { logToolCall, getOpsLog } from '../logging.js';
 import { isShuttingDown } from './shutdown.js';
+import { getKindForTool, isEngineLess } from './kinds.js';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
@@ -160,19 +161,37 @@ export async function withEngine(
 
     const project = ctx.instance.projects.find((p) => p.name === projectName)!;
 
+    // Operation kind dispatch. Reads invoke the handler directly; writes
+    // acquire the per-engine write mutex via engine.runExclusive so
+    // mutations across tools, sessions, and transports all serialize
+    // through a single chokepoint. An unclassified tool that reaches
+    // withEngine (i.e. not in kinds.ts) is a bug — fail fast with a clear
+    // code rather than silently running a write without the mutex.
+    const kind = getKindForTool(toolName);
+    if (kind === null && !isEngineLess(toolName)) {
+      return finalize(mcpError('MISSING_OPERATION_KIND',
+        `Tool "${toolName}" has no OperationKind registered in src/mcp/kinds.ts. ` +
+        `Every engine-bound tool must be listed as read or write.`));
+    }
+
     // Per-request timeout via Promise.race. The handler continues running
     // on timeout (cooperative cancellation into engine stages is deferred to
     // 0.8.5 — documented in docs/gaps.md). Its eventual completion emits a
     // delayed `tool_call_overrun` log line so operators can see what the
     // slow work was doing.
     const timeoutMs = getRequestTimeoutMs();
-    const handlerPromise = Promise.resolve(handler({
+    const callCtx: CallContext = {
       engine: poolResult.value,
       projectName,
       projectRoot: project.path,
       sessionId,
       requestId,
-    }));
+    };
+    const invokeHandler = (): Promise<McpToolResponse> => Promise.resolve(handler(callCtx));
+    const handlerPromise: Promise<McpToolResponse> =
+      kind === 'write'
+        ? poolResult.value.runExclusive(toolName, invokeHandler)
+        : invokeHandler();
 
     let timedOut = false;
     let timeoutHandle: ReturnType<typeof setTimeout> | null = null;

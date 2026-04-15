@@ -5,9 +5,18 @@
 
 import { existsSync, mkdirSync, writeFileSync, statSync, readdirSync, statfsSync } from 'node:fs';
 import path from 'node:path';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 import { ok, singleErr, type Result } from '../errors.js';
 import { AsyncFifoMutex } from './mutex.js';
+
+// Reentrancy marker — present in ALS scope when runExclusive is already
+// holding the write lock on `this` engine. Engine mutation methods keep
+// their internal runExclusive wrappers so direct callers (CLI, tests)
+// stay serialized; MCP boundary callers (withEngine's write branch) also
+// call runExclusive. The inner acquire sees the outer's ALS marker and
+// no-ops to avoid a non-reentrant deadlock.
+const writeScope = new AsyncLocalStorage<MaadEngine>();
 import { logger } from './logger.js';
 import type {
   DocId,
@@ -128,13 +137,35 @@ export class MaadEngine {
   // git-status result cache; refresh() updates it, probeGitClean() reads it.
   private lastGitCleanCache: boolean | null = null;
 
-  private async runExclusive<T>(op: string, fn: () => Promise<T>): Promise<T> {
+  /**
+   * Acquire the per-engine write mutex, run `fn`, release. Records
+   * `lastWriteOp` / `lastWriteAt` for health reporting and logs slow writes.
+   *
+   * **Reentrant.** When the current async context already holds this
+   * engine's write scope (e.g. `withEngine`'s write branch acquired at the
+   * MCP boundary, and the handler then calls `engine.createDocument` which
+   * itself wraps in `runExclusive`), the inner call skips acquisition and
+   * runs `fn` directly. Prevents double-locking deadlocks on a
+   * non-reentrant FIFO mutex. Bookkeeping (lastWriteOp/lastWriteAt) fires
+   * once per outermost scope.
+   *
+   * As of 0.5.0 R4 the MCP entry point is the primary caller — every tool
+   * classified as `write` in `src/mcp/kinds.ts` wraps here at the request
+   * boundary. Direct non-MCP callers (CLI, tests, import scripts) continue
+   * to call engine mutation methods normally; those methods self-wrap in
+   * runExclusive so direct callers stay serialized.
+   */
+  async runExclusive<T>(op: string, fn: () => Promise<T>): Promise<T> {
+    if (writeScope.getStore() === this) {
+      // Reentrant call — outer scope already owns the lock and bookkeeping.
+      return fn();
+    }
     const depthOnEnter = this.writeLock.depth();
     const release = await this.writeLock.acquire();
     const startedAtMs = Date.now();
     this.lastWriteOp = { op, startedAtMs };
     try {
-      const result = await fn();
+      const result = await writeScope.run(this, () => fn());
       // Record last-write timestamp for health reporting. Successful and
       // error-result writes both touch this — every mutating attempt counts
       // as activity; a caller can cross-reference the ops log to distinguish.
@@ -387,8 +418,9 @@ export class MaadEngine {
   }
 
   // --- Indexing ---
-  // Public indexing methods acquire the write mutex. Internal callers in
-  // writes.ts call indexing.indexFile() directly on ctx to avoid deadlock.
+  // Self-wrapping. MCP callers (withEngine write branch) enter runExclusive
+  // first; these inner wraps are reentrant no-ops. Direct callers (CLI,
+  // tests) get serialized via the first (outer) acquire.
   async indexAll(opts?: { force?: boolean }) {
     return this.runExclusive('indexAll', () => indexing.indexAll(this.ctx(), opts));
   }
@@ -417,6 +449,7 @@ export class MaadEngine {
   async getDocumentFull(id: DocId) { return composites.getDocumentFull(this.ctx(), id); }
 
   // --- Writes (read-only guarded, serialized under write mutex) ---
+  // Self-wrapping. Reentrant under an outer runExclusive scope.
   async createDocument(dt: DocType, fields: Record<string, unknown>, body?: string, customDocId?: string) {
     if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
     return this.runExclusive('createDocument',

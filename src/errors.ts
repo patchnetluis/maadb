@@ -42,7 +42,8 @@ export type ErrorCode =
   | 'WRITE_TIMEOUT'
   | 'SHUTTING_DOWN'
   | 'RATE_LIMITED'
-  | 'REQUEST_TIMEOUT';
+  | 'REQUEST_TIMEOUT'
+  | 'MISSING_OPERATION_KIND';
 
 export interface MaadError {
   code: ErrorCode;
