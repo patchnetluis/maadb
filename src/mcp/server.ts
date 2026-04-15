@@ -42,6 +42,8 @@ export interface HttpServeOptions {
   requestTimeoutMs: number;
   keepAliveTimeoutMs: number;
   trustProxy: boolean;
+  idleMs: number;
+  authToken?: string | undefined;
 }
 
 export interface ServeOptions {
@@ -142,6 +144,15 @@ export async function startServer(opts: ServeOptions): Promise<void> {
     logger.info('mcp', 'startup',
       `${toolCount} tools registered — instance "${instance.name}" (${instance.source}), ${instance.projects.length} project(s)${dryRun ? ' (dry-run)' : ''} [transport=http]`);
 
+    // Wire session-close fan-out: when a session is destroyed (for any
+    // reason — client DELETE, transport drop, idle sweep, shutdown), release
+    // its per-session rate-limit state. Other handlers (audit logging, etc.)
+    // can stack on top as the close-handler chain grows.
+    ctx.sessions.registerCloseHandler((sid, reason) => {
+      getRateLimiter().disposeSession(sid);
+      logger.info('mcp', 'session', `session_close sid=${sid} reason=${reason}`);
+    });
+
     const handle: HttpTransportHandle = await startHttpTransport({
       host: opts.http.host,
       port: opts.http.port,
@@ -150,6 +161,9 @@ export async function startServer(opts: ServeOptions): Promise<void> {
       requestTimeoutMs: opts.http.requestTimeoutMs,
       keepAliveTimeoutMs: opts.http.keepAliveTimeoutMs,
       trustProxy: opts.http.trustProxy,
+      idleMs: opts.http.idleMs,
+      authToken: opts.http.authToken,
+      sessions: ctx.sessions,
       serverFactory: () => buildMcpServer().server,
     });
 

@@ -19,9 +19,16 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { createRequire } from 'node:module';
 import { startHttpTransport, type HttpTransportHandle } from '../../src/mcp/transport/http.js';
+import { SessionRegistry } from '../../src/instance/session.js';
+import type { InstanceConfig } from '../../src/instance/config.js';
 
 const require = createRequire(import.meta.url);
 const pkg = require('../../package.json') as { version: string };
+
+function makeSessions(): SessionRegistry {
+  const instance: InstanceConfig = { name: 'test', source: 'file', projects: [] };
+  return new SessionRegistry(instance);
+}
 
 // Minimal factory — one tool registered so the server advertises `tools`
 // capability; tools/list then returns a well-formed `result` with our tool.
@@ -46,6 +53,8 @@ function defaultOpts(overrides: Partial<Parameters<typeof startHttpTransport>[0]
     requestTimeoutMs: 60_000,
     keepAliveTimeoutMs: 5_000,
     trustProxy: false,
+    idleMs: 1_800_000,
+    sessions: makeSessions(),
     serverFactory: makeFactory(),
     ...overrides,
   };

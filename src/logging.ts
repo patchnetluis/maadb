@@ -129,3 +129,14 @@ export interface WriteAuditFields {
 export function logWriteAudit(fields: WriteAuditFields): void {
   auditLog.info(fields, 'write');
 }
+
+// ---- Auth failure event (ops) ----------------------------------------------
+
+export interface AuthFailureFields {
+  remote_addr: string;
+  reason: 'missing' | 'invalid';
+}
+
+export function logAuthFailure(fields: AuthFailureFields): void {
+  opsLog.info(fields, 'auth_failure');
+}

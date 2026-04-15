@@ -32,8 +32,12 @@ export interface BindOptions {
   as?: Role;
 }
 
+export type SessionCloseReason = 'client' | 'transport' | 'idle' | 'shutdown';
+export type SessionCloseHandler = (sessionId: string, reason: SessionCloseReason) => void;
+
 export class SessionRegistry {
   private sessions = new Map<string, SessionState>();
+  private closeHandlers: SessionCloseHandler[] = [];
 
   constructor(private instance: InstanceConfig) {}
 
@@ -57,12 +61,42 @@ export class SessionRegistry {
     return state;
   }
 
-  destroy(sessionId: string): void {
+  /**
+   * Peek without bumping lastActivityAt. Used by the idle sweeper — it must
+   * not reset the very activity timestamp it's checking against.
+   */
+  peek(sessionId: string): SessionState | undefined {
+    return this.sessions.get(sessionId);
+  }
+
+  /**
+   * Register a handler fired when a session is destroyed, regardless of cause.
+   * Handlers should be cheap (syncronous, no throws); failures in one handler
+   * must not block others. Multiple handlers compose in registration order.
+   */
+  registerCloseHandler(handler: SessionCloseHandler): void {
+    this.closeHandlers.push(handler);
+  }
+
+  destroy(sessionId: string, reason: SessionCloseReason = 'client'): void {
+    if (!this.sessions.has(sessionId)) return;
     this.sessions.delete(sessionId);
+    for (const h of this.closeHandlers) {
+      try { h(sessionId, reason); } catch { /* best-effort fan-out */ }
+    }
   }
 
   size(): number {
     return this.sessions.size;
+  }
+
+  /**
+   * Iterate session snapshots without triggering lastActivityAt updates.
+   * Returned array is a copy — safe to mutate during iteration (the sweeper
+   * calls destroy() which mutates the underlying map).
+   */
+  snapshot(): SessionState[] {
+    return Array.from(this.sessions.values());
   }
 
   bindSingle(sessionId: string, projectName: string, opts: BindOptions = {}): Result<SessionState> {

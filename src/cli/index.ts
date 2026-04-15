@@ -12,6 +12,7 @@ import { cmdCreate, cmdUpdate } from './commands/write.js';
 import { cmdInit, cmdValidate, cmdReindex, cmdParse } from './commands/maintain.js';
 import { cmdHistory, cmdAudit } from './commands/audit.js';
 import { startServer } from '../mcp/server.js';
+import { checkAuthTokenAtBoot, shortTokenWarning } from '../mcp/transport/auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -104,7 +105,9 @@ async function cmdServe(): Promise<void> {
   let headersTimeoutMs: number = parseIntEnv(process.env['MAAD_HTTP_HEADERS_TIMEOUT_MS'], 10_000);
   let requestTimeoutMs: number = parseIntEnv(process.env['MAAD_HTTP_REQUEST_TIMEOUT_MS'], 60_000);
   let keepAliveTimeoutMs: number = parseIntEnv(process.env['MAAD_HTTP_KEEPALIVE_TIMEOUT_MS'], 5_000);
+  let idleMs: number = parseIntEnv(process.env['MAAD_SESSION_IDLE_MS'], 1_800_000);
   let trustProxy: boolean = process.env['MAAD_TRUST_PROXY'] === '1' || process.env['MAAD_TRUST_PROXY'] === 'true';
+  let authToken: string | undefined = process.env['MAAD_AUTH_TOKEN'];
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -119,12 +122,24 @@ async function cmdServe(): Promise<void> {
     else if (a === '--http-headers-timeout' && next) headersTimeoutMs = parseIntEnv(next, headersTimeoutMs);
     else if (a === '--http-request-timeout' && next) requestTimeoutMs = parseIntEnv(next, requestTimeoutMs);
     else if (a === '--http-keepalive-timeout' && next) keepAliveTimeoutMs = parseIntEnv(next, keepAliveTimeoutMs);
+    else if (a === '--session-idle-ms' && next) idleMs = parseIntEnv(next, idleMs);
     else if (a === '--trust-proxy') trustProxy = true;
+    else if (a === '--auth-token' && next) authToken = next;
   }
 
   if (transport !== 'stdio' && transport !== 'http') {
     console.error(`Error: --transport must be 'stdio' or 'http' (got '${transport}')`);
     process.exit(1);
+  }
+
+  if (transport === 'http') {
+    const err = checkAuthTokenAtBoot(authToken);
+    if (err) {
+      console.error(`Error: ${err}`);
+      process.exit(1);
+    }
+    const warn = shortTokenWarning(authToken!);
+    if (warn) console.error(`Warning: ${warn}`);
   }
 
   const base = {
@@ -141,6 +156,8 @@ async function cmdServe(): Promise<void> {
         requestTimeoutMs,
         keepAliveTimeoutMs,
         trustProxy,
+        idleMs,
+        authToken,
       },
     } : {}),
   } as const;
@@ -191,10 +208,12 @@ serve HTTP options (when --transport http):
   --transport <stdio|http>          Transport selection (default: stdio)
   --http-host <host>                Bind address (default: 127.0.0.1)
   --http-port <port>                Bind port (default: 7733)
+  --auth-token <token>              Bearer token (required for http; prefer MAAD_AUTH_TOKEN env)
   --http-max-body <bytes>           Max request body bytes (default: 1048576)
   --http-headers-timeout <ms>       node:http headersTimeout (default: 10000)
   --http-request-timeout <ms>       node:http requestTimeout (default: 60000)
   --http-keepalive-timeout <ms>     node:http keepAliveTimeout (default: 5000)
+  --session-idle-ms <ms>            Per-session idle eviction threshold (default: 1800000 = 30 min)
   --trust-proxy                     Use X-Forwarded-For first hop for remote IP in logs
 
 Environment Variables:
@@ -205,6 +224,8 @@ Environment Variables:
   MAAD_TRANSPORT                    stdio | http (default: stdio)
   MAAD_HTTP_HOST                    HTTP bind host (default: 127.0.0.1)
   MAAD_HTTP_PORT                    HTTP bind port (default: 7733)
+  MAAD_AUTH_TOKEN                   Bearer token for HTTP transport (required for http)
+  MAAD_SESSION_IDLE_MS              Per-session idle eviction threshold (default: 1800000)
   MAAD_HTTP_MAX_BODY                HTTP max body bytes (default: 1048576)
   MAAD_HTTP_HEADERS_TIMEOUT_MS      headersTimeout ms (default: 10000)
   MAAD_HTTP_REQUEST_TIMEOUT_MS      requestTimeout ms (default: 60000)

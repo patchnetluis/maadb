@@ -13,6 +13,9 @@ import { randomBytes } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { logger } from '../../engine/logger.js';
+import { logAuthFailure } from '../../logging.js';
+import { validateBearer } from './auth.js';
+import type { SessionRegistry } from '../../instance/session.js';
 
 export interface HttpTransportOptions {
   host: string;
@@ -22,8 +25,34 @@ export interface HttpTransportOptions {
   requestTimeoutMs: number;
   keepAliveTimeoutMs: number;
   trustProxy: boolean;
+  /**
+   * Per-session idle threshold. A session with no inbound client request for
+   * this many milliseconds is evicted by the idle sweeper. Defaults to 30 min.
+   * Outbound SSE pushes from the server do NOT count as activity — server
+   * activity != client activity.
+   */
+  idleMs: number;
+  /**
+   * Bearer token required on every request. Compared constant-time against
+   * the Authorization header. Undefined disables auth (dev/testing only —
+   * production always sets this).
+   */
+  authToken?: string | undefined;
+  /**
+   * Session registry for protocol-level state. HTTP transport fires destroy()
+   * on its close, which fans out to whatever close handlers the server
+   * wired in (rate-limit dispose, audit log, etc.).
+   */
+  sessions: SessionRegistry;
   /** Factory called once per new session to produce a fresh McpServer with tools registered. */
   serverFactory: () => McpServer;
+}
+
+interface TransportEntry {
+  transport: StreamableHTTPServerTransport;
+  createdAt: number;
+  lastActivityAt: number;
+  remoteAddr: string;
 }
 
 export interface HttpTransportHandle {
@@ -61,7 +90,7 @@ function applyResponseHardening(res: ServerResponse, kind: 'json' | 'sse'): void
 }
 
 export async function startHttpTransport(opts: HttpTransportOptions): Promise<HttpTransportHandle> {
-  const transports = new Map<string, StreamableHTTPServerTransport>();
+  const entries = new Map<string, TransportEntry>();
 
   const httpServer = createHttpServer(async (req, res) => {
     try {
@@ -81,18 +110,34 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
         return;
       }
 
+      // Middleware step 1: auth. Runs BEFORE session resolution so an
+      // unauthenticated caller can never discover whether a session id
+      // exists (404 SESSION_NOT_FOUND is reserved for authenticated callers).
+      if (opts.authToken !== undefined) {
+        const auth = validateBearer(req, opts.authToken);
+        if (!auth.ok) {
+          logAuthFailure({ remote_addr: remoteAddrFor(req, opts.trustProxy), reason: auth.reason });
+          writeJsonError(res, 401, 'UNAUTHORIZED', 'missing or invalid bearer token');
+          return;
+        }
+      }
+
       const sessionIdHeader = req.headers['mcp-session-id'];
       const sessionId = typeof sessionIdHeader === 'string' ? sessionIdHeader : undefined;
 
       // Existing session — route to its transport
-      if (sessionId && transports.has(sessionId)) {
-        const transport = transports.get(sessionId)!;
+      if (sessionId && entries.has(sessionId)) {
+        const entry = entries.get(sessionId)!;
+        // Inbound client request — bump transport-level lastActivityAt. This
+        // is the clock the idle sweeper uses. We intentionally do NOT update
+        // it on outbound SSE pushes; those are server activity, not client.
+        entry.lastActivityAt = Date.now();
         applyResponseHardening(res, req.method === 'GET' ? 'sse' : 'json');
-        await transport.handleRequest(req, res);
+        await entry.transport.handleRequest(req, res);
         return;
       }
 
-      // Unknown session ID on non-initialize request — 404 (auth will add a 401 gate in R2)
+      // Unknown session ID on non-initialize request — 404
       if (sessionId) {
         writeJsonError(res, 404, 'SESSION_NOT_FOUND', 'Unknown session');
         return;
@@ -105,18 +150,28 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
       }
 
       // New session: transport delegates ID generation to us (128-bit CSPRNG)
+      const remoteAddr = remoteAddrFor(req, opts.trustProxy);
       const transport: StreamableHTTPServerTransport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomBytes(16).toString('base64url'),
         onsessioninitialized: (sid: string) => {
-          transports.set(sid, transport);
-          logger.info('mcp', 'http', `session opened sid=${sid} remote=${remoteAddrFor(req, opts.trustProxy)}`);
+          const now = Date.now();
+          entries.set(sid, { transport, createdAt: now, lastActivityAt: now, remoteAddr });
+          // Register protocol-level state so registry.destroy(sid) has
+          // something to destroy — otherwise the fan-out chain (rate-limit
+          // dispose, audit handlers) never runs. withSession may also
+          // create(sid) lazily on first tool call; create() is idempotent.
+          opts.sessions.create(sid);
+          logger.info('mcp', 'http', `session opened sid=${sid} remote=${remoteAddr}`);
         },
       });
       transport.onclose = (): void => {
         const sid = transport.sessionId;
-        if (sid && transports.has(sid)) {
-          transports.delete(sid);
-          logger.info('mcp', 'http', `session closed sid=${sid}`);
+        if (sid && entries.has(sid)) {
+          entries.delete(sid);
+          // Fan out to the registry — this fires close handlers the server
+          // wired in (rate-limit dispose, session_close audit, etc.).
+          opts.sessions.destroy(sid, 'transport');
+          logger.info('mcp', 'http', `session closed sid=${sid} reason=transport`);
         }
       };
 
@@ -154,15 +209,40 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
 
   logger.info('mcp', 'http', `Server started on http://${opts.host}:${opts.port}/mcp`);
 
+  // Idle sweeper — walks the entries map every ~60s and evicts transports
+  // whose lastActivityAt is past the idle threshold. Unref'd so the interval
+  // alone doesn't keep the event loop alive; tick cadence is capped at
+  // idleMs so tiny idle thresholds don't produce microsecond spins in tests.
+  const sweepIntervalMs = Math.max(1_000, Math.min(60_000, Math.floor(opts.idleMs / 2) || 60_000));
+  const idleSweeper = setInterval(() => {
+    const now = Date.now();
+    const threshold = now - opts.idleMs;
+    for (const [sid, entry] of entries) {
+      if (entry.lastActivityAt < threshold) {
+        // Mark the registry first so the fan-out reason reflects WHY it
+        // closed. The transport.onclose below would otherwise fire with
+        // reason=transport. Destroy is idempotent so calling it twice is safe.
+        opts.sessions.destroy(sid, 'idle');
+        entries.delete(sid);
+        // Close the SSE transport — frees sockets and triggers SDK cleanup.
+        void entry.transport.close().catch(() => { /* best-effort */ });
+        logger.info('mcp', 'http', `session closed sid=${sid} reason=idle`);
+      }
+    }
+  }, sweepIntervalMs);
+  idleSweeper.unref?.();
+
   return {
     httpServer,
-    activeSessionCount: () => transports.size,
+    activeSessionCount: () => entries.size,
     close: async () => {
+      clearInterval(idleSweeper);
       await new Promise<void>((resolve) => httpServer.close(() => resolve()));
-      for (const t of transports.values()) {
-        try { await t.close(); } catch { /* best-effort */ }
+      for (const [sid, entry] of entries) {
+        try { await entry.transport.close(); } catch { /* best-effort */ }
+        opts.sessions.destroy(sid, 'shutdown');
       }
-      transports.clear();
+      entries.clear();
     },
   };
 }
