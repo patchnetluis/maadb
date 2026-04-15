@@ -53,27 +53,33 @@ Hardened the write path and operational surface before exposing the engine over 
 - New error codes: `RATE_LIMITED`, `REQUEST_TIMEOUT`, `SHUTTING_DOWN`, `WRITE_TIMEOUT` (reserved for 0.8.5)
 - 71 new tests across mutex/concurrency/idempotency/rate-limit/logging/lifecycle/health-extensions modules, 394 total passing
 
+### v0.5.0 — Remote MCP Transport (2026-04-15)
+
+Engine served over HTTP/SSE so MCP clients can connect across the network. One server process handles many concurrent client sessions. Builds on the 0.4.0 `SessionRegistry` (keyed by HTTP session ID) and the 0.4.1 hardened engine. stdio remains the default for local use.
+
+- [x] HTTP/SSE transport via `StreamableHTTPServerTransport` (MCP SDK 1.29+), `node:http` with explicit headers/request/keep-alive timeouts, response hardening (`nosniff` + `no-store`), 128-bit CSPRNG session IDs
+- [x] Bearer-token auth at handshake — constant-time compare (`crypto.timingSafeEqual`), 401 precedes 404 so unauth callers can't enumerate sessions, pino redaction on the authorization header
+- [x] Session lifecycle fan-out — `registerCloseHandler`, idempotent `destroy(sid, reason)`, `peek` without bumping `lastActivityAt`, rate-limit dispose on close
+- [x] Idle sweeper — inbound-only activity clock, evicts zombie SSE streams past `MAAD_SESSION_IDLE_MS` (30 min default)
+- [x] `OperationKind` (`read` / `write`) classification per tool, reentrant write mutex via AsyncLocalStorage — concurrent reads while a write holds the lock, deadlock-free re-entry from engine methods
+- [x] `maad_changes_since` polling delta — opaque base64url cursor, strict tuple ordering on `(updated_at, doc_id)`, deterministic pagination, operation classification from document version
+- [x] Extended `maad_health` — `transport {kind, host?, port?, uptimeSeconds}` and `sessions {active, openedTotal, closedTotal, lastOpenedAt, lastClosedAt, idleSweepLastRunAt}`
+- [x] Unauthenticated `GET /healthz` liveness probe — 200 `{ok:true}` live / 503 `SHUTTING_DOWN` during drain, no state leak in body, not exposed under stdio
+- [x] Audit + ops events — `session_open`, `session_close`, `auth_failure`, `idle_sweep` on their channels
+- [x] Deploy guides — [systemd + nginx (bare metal)](docs/deploy/systemd.md), [Docker + traefik](docs/deploy/docker.md)
+- [x] TLS terminated at reverse proxy (documented, not enforced in-engine)
+
+82 new tests (transport/auth/lifecycle/concurrency/changes-since/healthz/health-telemetry), 476 total passing. Spec at [`docs/specs/0.5.0-remote-mcp.md`](docs/specs/0.5.0-remote-mcp.md).
+
 ---
 
-## Current: v0.4.1
+## Current: v0.5.0
 
 See Shipped block above.
 
 ---
 
 ## Planned
-
-### 0.5.0 — Remote MCP Transport
-
-Pulled forward from 0.9.0. Reuses the `SessionRegistry` model built in 0.4.0 — same routing logic keyed by HTTP session ID instead of stdio process. Lands on the hardened engine from 0.4.1.
-
-- [ ] HTTP/SSE transport via `StreamableHTTPServerTransport` from the MCP SDK
-- [ ] Token-based auth at MCP handshake — bearer token maps to role
-- [ ] Single role tier at launch (authenticated = effective role); per-connection role refinement deferred
-- [ ] Concurrent read access (multiple agents, one instance)
-- [ ] `maad_changes_since <timestamp|version>` polling delta endpoint — cheap "what changed" for agents that want freshness between calls
-- [ ] Deployment guide for Docker / Azure Functions / VM
-- [ ] TLS terminated at reverse proxy (documented, not enforced in-engine)
 
 ### 0.5.1 — Deployment Workflow
 

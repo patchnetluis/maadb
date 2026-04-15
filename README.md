@@ -116,7 +116,7 @@ The MCP server connects an LLM agent to your project. Configuration depends on y
 openclaw mcp set maad '{"command":"node","args":["/path/to/maad/dist/cli.js","--project","/path/to/my-project","serve","--role","admin"]}'
 ```
 
-**Any MCP-compatible agent** — MAAD uses stdio transport. The command is:
+**Any MCP-compatible agent** — MAAD supports both stdio (default) and HTTP/SSE transports. The stdio command is:
 
 ```bash
 node /path/to/maad/dist/cli.js --project /path/to/project serve --role <reader|writer|admin>
@@ -132,6 +132,41 @@ node /path/to/maad/dist/cli.js --project /path/to/project serve --role <reader|w
 | `MAAD_PROV` | `--prov` | `on` |
 
 Flags take precedence over env vars. Env vars take precedence over defaults.
+
+### Remote MCP (HTTP/SSE)
+
+Since 0.5.0 the engine also serves over HTTP. One process handles many concurrent client sessions with bearer-token auth at the handshake, concurrent reads, and a polling delta tool (`maad_changes_since`). stdio remains the default for local use.
+
+```bash
+MAAD_AUTH_TOKEN=$(openssl rand -base64 48 | tr -d '=' | tr '+/' '-_') \
+node dist/cli.js --instance /path/to/instance.yaml serve \
+  --transport http --http-host 127.0.0.1 --http-port 7733
+```
+
+Flags (all mirror `MAAD_*` env vars):
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--transport <stdio\|http>` | `stdio` | Transport selection |
+| `--http-host <host>` | `127.0.0.1` | Bind address (loopback = proxy-fronted) |
+| `--http-port <port>` | `7733` | Bind port |
+| `--auth-token <token>` | *required for http* | Bearer token (≥32 bytes recommended) |
+| `--session-idle-ms <ms>` | `1800000` (30 min) | Idle session eviction threshold |
+| `--http-max-body <bytes>` | `1048576` (1 MiB) | Max request body |
+| `--trust-proxy` | `false` | Trust `X-Forwarded-For` first hop |
+| `--http-headers-timeout <ms>` | `10000` | `node:http` headers timeout |
+| `--http-request-timeout <ms>` | `60000` | `node:http` request timeout |
+| `--http-keepalive-timeout <ms>` | `5000` | `node:http` keep-alive timeout |
+
+Every request carries `Authorization: Bearer <token>`, validated constant-time. Missing/wrong token returns `401 UNAUTHORIZED` before any session state is created — unauthenticated callers cannot enumerate session IDs.
+
+Unauthenticated `GET /healthz` returns `{ok:true}` when live, `{ok:false, errors:[{code:"SHUTTING_DOWN"}]}` with HTTP 503 during drain. Rich health (project names, doc counts, session telemetry) lives in the authenticated `maad_health` MCP tool — liveness ≠ health.
+
+TLS is expected at a reverse proxy in front of the engine, not inside the process.
+
+**Deployment guides:**
+- [systemd + nginx (bare metal)](docs/deploy/systemd.md)
+- [Docker + traefik](docs/deploy/docker.md)
 
 ### Step 4 — Connect and build
 
@@ -160,7 +195,7 @@ In multi-project mode (`--instance`), 4 additional session tools are always avai
 
 The MCP `--role` flag maps to a typical admin/user split. For initial setup, use `--role admin`. After the project is operational, connect additional agents with scoped roles (`reader` or `writer`).
 
-Today this is trust-based — roles control which tools are visible, but agents with filesystem access can bypass MCP. True enforcement comes with remote MCP transport (roadmap 0.9.0).
+Under stdio, roles are trust-based — agents with filesystem access can bypass MCP. Under HTTP transport (since 0.5.0), the bearer token authenticates the caller and the role attached to the project binding governs the visible tool set. Per-connection role tiers driven by the token itself are on the roadmap (0.8.5).
 
 ### Multiple agents, one project
 
@@ -311,13 +346,13 @@ All tools return `{ ok: true, data: {...} }` or `{ ok: false, errors: [...] }`.
 ## Stack
 
 - TypeScript strict, Node.js 22+ (tested on v24)
-- 4 production dependencies: `better-sqlite3`, `gray-matter`, `simple-git`, `@modelcontextprotocol/sdk`
-- 323 tests, Vitest
+- 5 production dependencies: `better-sqlite3`, `gray-matter`, `simple-git`, `@modelcontextprotocol/sdk`, `pino`
+- 476 tests, Vitest
 - See [FRAMEWORK.md](FRAMEWORK.md) for data doctrine, tier model, and engine design principles
 
 ## Current State
 
-**v0.4.0** — Multi-project routing: one MCP server serves many MAAD projects via `instance.yaml`. Sessions bind to a project (single mode) or whitelist (multi mode) with per-project roles and optional session-level downgrade. Backward-compatible: `--project --role` still works as a synthetic single-project instance with auto-bind. 4 new instance-level tools (`maad_projects`, `maad_use_project`, `maad_use_projects`, `maad_current_session`). 323 tests passing.
+**v0.5.0** — Remote MCP transport (HTTP/SSE) via `StreamableHTTPServerTransport`. Bearer-token auth at the handshake, per-session lifecycle with idle eviction, operation kinds (concurrent reads bypass the write mutex), `maad_changes_since` polling delta, extended `maad_health` with transport + session telemetry, unauthenticated `GET /healthz` liveness. Builds on the hardened 0.4.1 engine and the 0.4.0 multi-project routing model. stdio remains the default. 476 tests passing.
 
 ## Roadmap
 
@@ -325,13 +360,16 @@ All tools return `{ ok: true, data: {...} }` or `{ ok: false, errors: [...] }`.
 |---------|------|
 | ~~0.2.x~~ | ~~MCP server, production hardening, read path improvements~~ — **shipped** |
 | ~~0.4.0~~ | ~~Multi-project routing — one MCP, many projects, session-bound mode~~ — **shipped** |
-| 0.4.5 | Deployment workflow — deploy skill, scaffolding, MCP config generation |
-| 0.5.0 | Import workflow — inbox pattern, duplicate detection, readonly types |
-| 0.5.5 | Provenance + admin tooling |
-| 0.6.0 | Query power — FTS5, fuzzy entity matching |
-| 0.7.0 | Object attributes — user-defined tags, YAML-stored |
-| 0.8.0 | npm package prep |
-| 0.9.0 | Remote MCP — HTTP/SSE transport, per-connection roles, hosted deployment |
+| ~~0.4.1~~ | ~~Production hardening — write mutex, idempotency, rate limit, logging, lifecycle, health~~ — **shipped** |
+| ~~0.5.0~~ | ~~Remote MCP — HTTP/SSE transport, bearer auth, concurrent reads, `maad_changes_since`, deploy guides~~ — **shipped** |
+| 0.5.1 | Deployment workflow — `_skills/deploy.md`, `maad init-instance`, platform-specific MCP config generation |
+| 0.6.0 | npm package prep — `npx maad serve`, published to npm |
+| 0.7.0 | Import workflow — `_inbox/`, duplicate detection, readonly types |
+| 0.7.5 | LLM evaluation — multi-model testing, friction inventory, benchmarks |
+| 0.8.0 | Provenance refinement + admin dashboard + `maad_export` |
+| 0.8.5 | Remote MCP hardening — per-token role tiers, rate-limit policy, stress suite, metrics export |
+| 0.9.0 | Query power — FTS5, fuzzy entity matching, compound filters |
+| 0.9.5 | Object attributes — user-defined tags on extracted objects |
 | 1.0.0 | Stable release — API locked, npm published |
 
 ## License
