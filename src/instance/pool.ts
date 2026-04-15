@@ -83,4 +83,17 @@ export class EnginePool {
       this.engines.delete(name);
     }
   }
+
+  /**
+   * Sum of `writeQueueDepth()` across every initialized engine. Used by the
+   * shutdown drain loop to know when it's safe to exit. Uninitialized engines
+   * contribute 0 and are not lazy-initialized.
+   */
+  totalWriteQueueDepth(): number {
+    let total = 0;
+    for (const engine of this.engines.values()) {
+      total += engine.writeQueueDepth();
+    }
+    return total;
+  }
 }

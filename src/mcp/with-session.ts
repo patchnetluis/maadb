@@ -22,7 +22,16 @@ import { resolveSessionId } from '../instance/session.js';
 import { getMinRoleForTool, roleSatisfies } from './roles.js';
 import { errorResponse, attachMeta } from './response.js';
 import { getRateLimiter } from './rate-limit.js';
-import { logToolCall } from '../logging.js';
+import { logToolCall, getOpsLog } from '../logging.js';
+import { isShuttingDown } from './shutdown.js';
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+
+function getRequestTimeoutMs(): number {
+  const env = process.env.MAAD_REQUEST_TIMEOUT_MS;
+  if (env && !Number.isNaN(Number(env))) return Number(env);
+  return DEFAULT_REQUEST_TIMEOUT_MS;
+}
 
 interface CallContext {
   engine: MaadEngine;
@@ -77,6 +86,12 @@ export async function withEngine(
     });
     return stamped;
   };
+
+  // Reject new work during shutdown before any other check.
+  if (isShuttingDown()) {
+    return finalize(mcpError('SHUTTING_DOWN',
+      'Server is shutting down; retry against a healthy instance.'));
+  }
 
   let state = ctx.sessions.get(sessionId);
   if (!state) state = ctx.sessions.create(sessionId);
@@ -140,13 +155,54 @@ export async function withEngine(
     if (!poolResult.ok) return finalize(errorResponse(poolResult.errors));
 
     const project = ctx.instance.projects.find((p) => p.name === projectName)!;
-    const response = await handler({
+
+    // Per-request timeout via Promise.race. The handler continues running
+    // on timeout (cooperative cancellation into engine stages is deferred to
+    // 0.8.5 — documented in docs/gaps.md). Its eventual completion emits a
+    // delayed `tool_call_overrun` log line so operators can see what the
+    // slow work was doing.
+    const timeoutMs = getRequestTimeoutMs();
+    const handlerPromise = Promise.resolve(handler({
       engine: poolResult.value,
       projectName,
       projectRoot: project.path,
       sessionId,
       requestId,
-    });
+    }));
+
+    let timedOut = false;
+    const response = await Promise.race<McpToolResponse>([
+      handlerPromise,
+      new Promise<McpToolResponse>((resolve) => {
+        setTimeout(() => {
+          timedOut = true;
+          resolve(mcpErrorWithDetails('REQUEST_TIMEOUT',
+            `Tool ${toolName} exceeded per-request timeout of ${timeoutMs}ms`,
+            { tool: toolName, limitMs: timeoutMs },
+          ));
+        }, timeoutMs);
+      }),
+    ]);
+
+    if (timedOut) {
+      // Observe the handler's eventual completion and log the overrun.
+      // Keep the observation unhandled-rejection-safe.
+      void handlerPromise.then(
+        () => {
+          getOpsLog().warn(
+            { event: 'tool_call_overrun', request_id: requestId, tool: toolName, limit_ms: timeoutMs },
+            'tool_call_overrun',
+          );
+        },
+        (err) => {
+          getOpsLog().warn(
+            { event: 'tool_call_overrun', request_id: requestId, tool: toolName, limit_ms: timeoutMs, error: String(err) },
+            'tool_call_overrun',
+          );
+        },
+      );
+    }
+
     return finalize(response);
   } finally {
     slot.release();

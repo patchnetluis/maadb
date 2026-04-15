@@ -15,6 +15,8 @@ import { setProvenanceMode } from './response.js';
 import { initIdempotencyCache, readIdempotencyEnv } from './idempotency.js';
 import { initRateLimiter, readRateLimitEnv } from './rate-limit.js';
 import { initLogging, readLoggingEnv } from '../logging.js';
+import { installSignalHandlers } from './shutdown.js';
+import { getRateLimiter } from './rate-limit.js';
 import { registerShutdownHooks } from './lifecycle.js';
 import { logger } from '../engine/logger.js';
 import { synthesizeLegacyInstance, loadInstance, type InstanceConfig } from '../instance/config.js';
@@ -118,11 +120,18 @@ export async function startServer(opts: ServeOptions): Promise<void> {
   logger.info('mcp', 'startup',
     `${toolCount} tools registered — instance "${instance.name}" (${instance.source}), ${instance.projects.length} project(s)${dryRun ? ' (dry-run)' : ''}`);
 
-  // Shutdown hooks — close the whole pool, not a single engine.
-  registerShutdownHooks(null, async () => {
-    await pool.closeAll();
-    await server.close();
-  });
+  // Drain-aware shutdown: SIGTERM/SIGINT enter DRAINING, wait for in-flight
+  // writes to settle (bounded by MAAD_SHUTDOWN_TIMEOUT_MS, default 10s), then
+  // close the pool, run final cleanup, and exit with code 0 on clean drain
+  // or 1 on drain timeout.
+  installSignalHandlers(
+    { pool, rateLimiter: getRateLimiter() },
+    {
+      finalCleanup: async () => {
+        try { await server.close(); } catch { /* best-effort */ }
+      },
+    },
+  );
 
   // Start stdio transport
   const transport = new StdioServerTransport();

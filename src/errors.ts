@@ -41,7 +41,8 @@ export type ErrorCode =
   | 'ROLE_UPGRADE_DENIED'
   | 'WRITE_TIMEOUT'
   | 'SHUTTING_DOWN'
-  | 'RATE_LIMITED';
+  | 'RATE_LIMITED'
+  | 'REQUEST_TIMEOUT';
 
 export interface MaadError {
   code: ErrorCode;

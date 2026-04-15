@@ -62,13 +62,15 @@ export async function startupEngine(projectRoot: string): Promise<StartupResult>
 }
 
 export function registerShutdownHooks(engine: MaadEngine | null, cleanup?: () => Promise<void>): void {
+  // Legacy shim retained for any caller that still uses the single-engine
+  // flow. The modern path is installSignalHandlers(target, opts) from
+  // src/mcp/shutdown.ts with pool + rate limiter. Server.ts uses that path.
   const shutdown = async () => {
     logger.info('lifecycle', 'shutdown', 'Shutting down...');
     if (engine) engine.close();
     if (cleanup) await cleanup();
     process.exit(0);
   };
-
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 }
