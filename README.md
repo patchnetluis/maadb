@@ -1,22 +1,29 @@
 # MAADB — Markdown As A Database
 
-A database engine that treats markdown files as canonical records and provides deterministic read/write access through a structured interface.
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Node.js](https://img.shields.io/badge/node-%E2%89%A522-brightgreen.svg)](package.json)
+[![TypeScript](https://img.shields.io/badge/typescript-strict-blue.svg)](tsconfig.json)
+[![Tests](https://img.shields.io/badge/tests-554%20passing-brightgreen.svg)](tests)
+[![Version](https://img.shields.io/badge/version-0.6.7-purple.svg)](Version.md)
 
-Markdown remains the source of truth, while schemas and indexing make records queryable, linkable, and easier to work with programmatically.
+> **Your data stays in markdown. The engine makes it queryable.**
 
-It is designed for document-centric data where structured fields and narrative context need to live together in the same record.
+MAADB treats markdown files as the canonical data store, not the presentation layer. YAML frontmatter defines structure, inline annotations extract entities, headings create addressable sections, and the engine builds a queryable pointer-only index over the lot — then serves everything to LLM agents through MCP.
 
-## How it works
+Designed for document-centric data where structured fields and narrative context need to live together in the same record.
 
-```
-Markdown files (your data)
-  -> YAML registry + schemas (define structure)
-  -> Engine (parse, validate, extract, index)
-  -> SQLite (pointer-only query index)
-  -> MCP server (LLM agent interface)
-```
+## Why MAADB
 
-### Record format
+- **Markdown is canonical.** No impedance mismatch between your records and your view of them. Open any file in any editor — everything is human-readable.
+- **Git is the audit trail.** Every write is a commit. `maad_history` shows full provenance for any document.
+- **LLM-native.** MCP server ships with 22+ tools for discovery, read, write, and maintenance. Designed for agent workflows from the ground up.
+- **Schema-enforced, not schema-heavy.** YAML schemas declare types, relationships, and precision contracts. Enforcement fires on write, never on read — historical data stays untouched when contracts tighten.
+- **Pointer-only index.** SQLite stores file pointers and extracted object references. Content always reads from markdown. Index is rebuildable from source; never load-bearing.
+- **Concurrent-safe.** FIFO write mutex, idempotency keys, stale-lock recovery, rate limiting, graceful shutdown. Production-hardened.
+
+## Quick example
+
+A record lives as markdown with a schema-validated YAML header:
 
 ```markdown
 ---
@@ -42,19 +49,25 @@ Initial issue raised on [[date:2026-03-28|March 28, 2026]].
 [[person:Jane Smith|Jane]] representing [[org:Acme Corporation|Acme]].
 ```
 
-Three layers: frontmatter for structured fields, headings for addressable sections, `[[type:value|label]]` annotations for inline entities extracted and indexed by the engine.
+Three addressable layers:
 
-## Deployment
+- **Frontmatter** — structured fields, schema-validated on write.
+- **Headings** — individually-readable sections via line pointers.
+- **Inline annotations** — `[[type:value|label]]` entities extracted and indexed cross-document.
 
-MAAD is designed for LLM agents. The typical deployment is: clone the engine, create a project, wire up MCP, and let an agent build and operate the database.
+## How it works
 
-### Prerequisites
+```
+Markdown files (your data)
+  -> YAML registry + schemas (define structure)
+  -> Engine (parse, validate, extract, index)
+  -> SQLite (pointer-only query index)
+  -> MCP server (LLM agent interface)
+```
 
-- Node.js 22+ (tested on v24)
-- npm
-- Git (required — MAAD uses git for audit trail)
+See [FRAMEWORK.md](FRAMEWORK.md) for data doctrine, tier model, and engine design principles.
 
-### Step 1 — Install the engine
+## Quick start
 
 ```bash
 git clone https://github.com/maadb/maadb.git
@@ -62,19 +75,9 @@ cd maadb
 npm install && npm run build
 ```
 
-### Step 2 — Create a project
+Create a project directory anywhere, then wire up MCP in your agent.
 
-A project is a directory with a `--project` path passed to the MCP server. It can live anywhere. You only need to create the directory — the agent handles the internal structure (`_registry/`, `_schema/`, `data/`, etc.) via the Architect skill after MCP is connected.
-
-```bash
-mkdir my-project
-```
-
-### Step 3 — Wire up MCP
-
-The MCP server connects an LLM agent to your project. Configuration depends on your platform.
-
-**Claude Code** — add to `.mcp.json` in the project directory:
+**Claude Code** (`.mcp.json` in the project directory):
 
 ```json
 {
@@ -82,7 +85,7 @@ The MCP server connects an LLM agent to your project. Configuration depends on y
     "maad": {
       "command": "node",
       "args": [
-        "/absolute/path/to/maad/dist/cli.js",
+        "/absolute/path/to/maadb/dist/cli.js",
         "--project", "/absolute/path/to/my-project",
         "serve",
         "--role", "admin"
@@ -92,50 +95,19 @@ The MCP server connects an LLM agent to your project. Configuration depends on y
 }
 ```
 
-**Claude Desktop** — add to `claude_desktop_config.json`:
+Same shape for Claude Desktop (`claude_desktop_config.json`) and OpenClaw. Any MCP-compatible agent works — stdio is the default, HTTP/SSE is available since 0.5.0.
 
-```json
-{
-  "mcpServers": {
-    "maad": {
-      "command": "node",
-      "args": [
-        "/absolute/path/to/maad/dist/cli.js",
-        "--project", "/absolute/path/to/my-project",
-        "serve",
-        "--role", "admin"
-      ]
-    }
-  }
-}
-```
+Restart your agent. The agent detects an empty project and enters **Architect mode** to design the schema based on your goal:
 
-**OpenClaw** — register as an MCP server:
+> *"Set up a CRM for my law firm."*
+> *"Index my research papers for querying."*
+> *"Create a persistent memory store for this agent."*
 
-```bash
-openclaw mcp set maad '{"command":"node","args":["/path/to/maad/dist/cli.js","--project","/path/to/my-project","serve","--role","admin"]}'
-```
+The Architect skill handles type discovery, schema design, registry creation, and deployment. From there, any agent with an MCP connection can read and write records.
 
-**Any MCP-compatible agent** — MAAD supports both stdio (default) and HTTP/SSE transports. The stdio command is:
+## Remote / hosted deployment
 
-```bash
-node /path/to/maad/dist/cli.js --project /path/to/project serve --role <reader|writer|admin>
-```
-
-**Environment variables** — useful for container deployments and OpenClaw SecretRefs:
-
-| Variable | Equivalent flag | Example |
-|----------|----------------|---------|
-| `MAAD_PROJECT` | `--project` | `/data/my-project` |
-| `MAAD_INSTANCE` | `--instance` | `/data/instance.yaml` |
-| `MAAD_ROLE` | `--role` | `admin` |
-| `MAAD_PROV` | `--prov` | `on` |
-
-Flags take precedence over env vars. Env vars take precedence over defaults.
-
-### Remote MCP (HTTP/SSE)
-
-Since 0.5.0 the engine also serves over HTTP. One process handles many concurrent client sessions with bearer-token auth at the handshake, concurrent reads, and a polling delta tool (`maad_changes_since`). stdio remains the default for local use.
+MAADB serves over HTTP/SSE for multi-session hosted deployments. One process handles many concurrent client sessions with bearer-token auth at the handshake, concurrent reads, polling delta (`maad_changes_since`), and an unauthenticated `/healthz` liveness probe. TLS terminated upstream at a reverse proxy.
 
 ```bash
 MAAD_AUTH_TOKEN=$(openssl rand -base64 48 | tr -d '=' | tr '+/' '-_') \
@@ -143,124 +115,24 @@ node dist/cli.js --instance /path/to/instance.yaml serve \
   --transport http --http-host 127.0.0.1 --http-port 7733
 ```
 
-Flags (all mirror `MAAD_*` env vars):
+Deployment guides:
 
-| Flag | Default | Purpose |
-|------|---------|---------|
-| `--transport <stdio\|http>` | `stdio` | Transport selection |
-| `--http-host <host>` | `127.0.0.1` | Bind address (loopback = proxy-fronted) |
-| `--http-port <port>` | `7733` | Bind port |
-| `--auth-token <token>` | *required for http* | Bearer token (≥32 bytes recommended) |
-| `--session-idle-ms <ms>` | `1800000` (30 min) | Idle session eviction threshold |
-| `--http-max-body <bytes>` | `1048576` (1 MiB) | Max request body |
-| `--trust-proxy` | `false` | Trust `X-Forwarded-For` first hop |
-| `--http-headers-timeout <ms>` | `10000` | `node:http` headers timeout |
-| `--http-request-timeout <ms>` | `60000` | `node:http` request timeout |
-| `--http-keepalive-timeout <ms>` | `5000` | `node:http` keep-alive timeout |
-
-Every request carries `Authorization: Bearer <token>`, validated constant-time. Missing/wrong token returns `401 UNAUTHORIZED` before any session state is created — unauthenticated callers cannot enumerate session IDs.
-
-Unauthenticated `GET /healthz` returns `{ok:true}` when live, `{ok:false, errors:[{code:"SHUTTING_DOWN"}]}` with HTTP 503 during drain. Rich health (project names, doc counts, session telemetry) lives in the authenticated `maad_health` MCP tool — liveness ≠ health.
-
-TLS is expected at a reverse proxy in front of the engine, not inside the process.
-
-**Deployment guides:**
 - [systemd + nginx (bare metal)](docs/deploy/systemd.md)
 - [Docker + traefik](docs/deploy/docker.md)
 
-### Step 4 — Connect and build
+## Access roles
 
-After wiring MCP, restart your agent session. The agent will see `maad_*` tools. From there:
-
-1. Agent reads `MAAD.md` → sees this is a MAAD project
-2. Agent runs `maad_summary` → detects empty project
-3. Agent reads `_skills/architect-core.md` → enters Architect mode
-4. Agent designs schema based on your goal, deploys the database
-
-Tell the agent what you want: *"Set up a CRM for my law firm"*, *"Index my research papers for querying"*, *"Create a persistent memory store for this agent."* The Architect handles the rest.
-
-## Access Roles
-
-MCP roles control what tools an agent can use. Set via `--role` flag at server startup.
+MCP roles control what tools an agent can use. Set via `--role` at server startup, or in `instance.yaml` per project.
 
 | Role | Tools | Use case |
 |------|-------|----------|
-| `reader` (default) | scan, summary, describe, get, query, search, related, schema, aggregate, join, verify, history, audit | Read-only agents, reporting, analysis |
+| `reader` (default) | scan, summary, describe, get, query, search, related, schema, aggregate, join, verify, changes_since, history, audit | Read-only agents, reporting, analysis |
 | `writer` | reader + create, update, validate, bulk_create, bulk_update | Standard agents that read and write records |
 | `admin` | writer + delete, reindex, reload, health | Project setup, schema changes, maintenance |
 
-In multi-project mode (`--instance`), 4 additional session tools are always available pre-bind: `maad_projects`, `maad_use_project`, `maad_use_projects`, `maad_current_session`.
+Under stdio, roles are trust-based — agents with filesystem access can bypass MCP. Under HTTP transport, the bearer token authenticates the caller and the role attached to the project binding governs the visible tool set. Per-token role tiers are on the roadmap (0.6.0).
 
-### Recommended workflow
-
-The MCP `--role` flag maps to a typical admin/user split. For initial setup, use `--role admin`. After the project is operational, connect additional agents with scoped roles (`reader` or `writer`).
-
-Under stdio, roles are trust-based — agents with filesystem access can bypass MCP. Under HTTP transport (since 0.5.0), the bearer token authenticates the caller and the role attached to the project binding governs the visible tool set. Per-connection role tiers driven by the token itself are on the roadmap (0.8.5).
-
-### Multiple agents, one project
-
-Each agent gets its own MCP config pointing at the same project with the appropriate role:
-
-```json
-{
-  "mcpServers": {
-    "maad-admin": {
-      "command": "node",
-      "args": ["...", "serve", "--role", "admin"]
-    },
-    "maad-user": {
-      "command": "node",
-      "args": ["...", "serve", "--role", "writer"]
-    }
-  }
-}
-```
-
-### Multiple projects
-
-Two options. Single-project: one MCP server per project (works today). Multi-project: one server, many projects, session-bound routing via `instance.yaml` (since 0.4.0).
-
-**Single-project (per project, scoped role):**
-
-```json
-{
-  "mcpServers": {
-    "maad-crm": {
-      "command": "node",
-      "args": ["...", "--project", "/path/to/crm", "serve", "--role", "admin"]
-    },
-    "maad-research": {
-      "command": "node",
-      "args": ["...", "--project", "/path/to/research", "serve", "--role", "writer"]
-    }
-  }
-}
-```
-
-**Multi-project (one server, whitelist per session):**
-
-```yaml
-# instance.yaml
-name: my-instance
-projects:
-  - { name: crm,      path: /path/to/crm,      role: admin }
-  - { name: research, path: /path/to/research, role: writer }
-```
-
-```json
-{
-  "mcpServers": {
-    "maad": {
-      "command": "node",
-      "args": ["...", "--instance", "/path/to/instance.yaml", "serve"]
-    }
-  }
-}
-```
-
-Agents call `maad_use_project <name>` (single mode) or `maad_use_projects [names...]` (multi mode) once per session before other tools.
-
-## Project Layout
+## Project layout
 
 ```
 my-project/
@@ -282,9 +154,9 @@ my-project/
 
 **Convention:** `_` prefix = engine-managed. `data/` = your records. Records never live at the project root.
 
-## Project Archetypes
+## Project archetypes
 
-MAAD supports different project patterns. The Architect skill (`_skills/architect-core.md`) guides schema design based on the archetype.
+MAADB supports different project patterns. The Architect skill guides schema design based on the archetype.
 
 | Archetype | Data flow | Examples |
 |-----------|-----------|---------|
@@ -294,88 +166,39 @@ MAAD supports different project patterns. The Architect skill (`_skills/architec
 | **Analysis project** | Import + cross-reference | Historical records, competitive research, audit corpus |
 | **Agent memory** | Agent-written, agent-read | Preferences, learned patterns, project context |
 
-## MCP Tools
+## MCP tools
 
-All tools return `{ ok: true, data: {...} }` or `{ ok: false, errors: [...] }`.
+All tools return `{ ok: true, data: {...} }` or `{ ok: false, errors: [...] }`. Call `maad_schema <type>` for full field definitions before writing.
 
-### Discover
-| Tool | What it does |
-|------|-------------|
-| `maad_scan` | Analyze raw markdown — no registry needed |
-| `maad_summary` | **Start here.** Types, counts, sample IDs, object inventory |
-| `maad_describe` | Project overview: types, doc counts, primitives |
-| `maad_schema` | Field definitions for a type |
+**Discover:** `maad_scan`, `maad_summary`, `maad_describe`, `maad_schema`
+**Read:** `maad_get`, `maad_query`, `maad_search`, `maad_related`, `maad_aggregate`, `maad_join`, `maad_verify`, `maad_changes_since`
+**Write:** `maad_create`, `maad_update`, `maad_bulk_create`, `maad_bulk_update`, `maad_validate`
+**Maintain:** `maad_delete`, `maad_reindex`, `maad_reload`, `maad_health`, `maad_history`, `maad_audit`
 
-### Read
-| Tool | What it does |
-|------|-------------|
-| `maad_get` | Read a record (hot/warm/cold/full tiers) |
-| `maad_query` | Find documents by type, filters, and field projection |
-| `maad_search` | Cross-document object search |
-| `maad_related` | Connected documents via ref traversal |
-| `maad_aggregate` | Count/sum/avg/min/max grouped by field |
-| `maad_join` | Query + follow refs + project fields from both sides |
-| `maad_verify` | Fact-check a field value or document count against the database |
+In multi-project mode, session tools are always available pre-bind: `maad_projects`, `maad_use_project`, `maad_use_projects`, `maad_current_session`.
 
-### Write
-| Tool | What it does |
-|------|-------------|
-| `maad_create` | Create a new record |
-| `maad_update` | Modify fields or append to body |
-| `maad_bulk_create` | Create multiple records in one call |
-| `maad_bulk_update` | Update multiple records in one call |
-| `maad_validate` | Check record(s) against schema |
-
-### Maintain
-| Tool | What it does |
-|------|-------------|
-| `maad_delete` | Remove a record |
-| `maad_reindex` | Rebuild index from markdown |
-| `maad_reload` | Reload registry + schemas without restart |
-| `maad_health` | Engine status and diagnostics |
-| `maad_history` | Git history for a document |
-| `maad_audit` | Project-wide activity log |
-
-## Agent Boot Flow
+## Agent boot flow
 
 1. Agent reads `MAAD.md` → stable operating instructions
 2. Agent runs `maad_summary` → live project snapshot
 3. If empty project → reads `_skills/architect-core.md`, enters Architect mode
 4. If live project → uses MCP tools for normal operations
 
+## Current state
+
+**v0.6.7 — Schema Precision Hints.** Date fields can declare `store_precision` (engine-enforced minimum on write) and `display_precision` (consumer rendering hint). Enforcement fires at write-time only — reads, reindex, and audit paths never judge historical data. Non-breaking by default: `on_coarser: warn` surfaces drift via `_meta.warnings[]` and ops log without blocking the write; `on_coarser: error` opts into strict rejection. `maad_validate includePrecision: true` scans historical records for precision drift without counting them invalid.
+
+Builds on the 0.5.0 remote MCP transport and 0.4.1 hardened engine. 554 tests passing.
+
+See [Version.md](Version.md) for full release history and [ROADMAP.md](ROADMAP.md) for the path to 1.0.
+
 ## Stack
 
 - TypeScript strict, Node.js 22+ (tested on v24)
 - 5 production dependencies: `better-sqlite3`, `gray-matter`, `simple-git`, `@modelcontextprotocol/sdk`, `pino`
 - 554 tests, Vitest
-- See [FRAMEWORK.md](FRAMEWORK.md) for data doctrine, tier model, and engine design principles
-
-## Current State
-
-**v0.6.7** — Schema Precision Hints. Date fields can declare `store_precision` (engine-enforced minimum on write) and `display_precision` (consumer rendering hint). Enforcement fires at write-time only — reads, reindex, and audit paths never judge historical data. Non-breaking by default: `on_coarser: warn` surfaces drift via response `_meta.warnings[]` and ops log without blocking the write; `on_coarser: error` opts into strict rejection. `maad_validate includePrecision: true` scans historical records for precision drift without counting them invalid. Builds on the 0.5.0 remote MCP transport and 0.4.1 hardened engine. 554 tests passing.
-
-## Roadmap
-
-| Version | What |
-|---------|------|
-| ~~0.2.x~~ | ~~MCP server, production hardening, read path improvements~~ — **shipped** |
-| ~~0.4.0~~ | ~~Multi-project routing — one MCP, many projects, session-bound mode~~ — **shipped** |
-| ~~0.4.1~~ | ~~Production hardening — write mutex, idempotency, rate limit, logging, lifecycle, health~~ — **shipped** |
-| ~~0.5.0~~ | ~~Remote MCP — HTTP/SSE transport, bearer auth, concurrent reads, `maad_changes_since`, deploy guides~~ — **shipped** |
-| ~~0.6.7~~ | ~~Schema precision hints — `store_precision`/`display_precision`, warn-or-error contract, round-trip preservation, `maad_validate includePrecision`~~ — **shipped** |
-| 0.5.1 | Deployment workflow — `_skills/deploy.md`, `maad init-instance`, platform-specific MCP config generation |
-| 0.6.0 | Scoped auth & identity — per-token roles, token registry, audit identity attribution |
-| 0.6.5 | Live notifications — `maad_subscribe`, SSE push on writes |
-| 0.7.0 | npm package prep — `npx maad serve`, published to npm |
-| 0.7.5 | Import workflow — `_inbox/`, duplicate detection, readonly types |
-| 0.8.0 | LLM evaluation — multi-model testing, friction inventory, benchmarks |
-| 0.8.5 | Provenance refinement + admin dashboard + `maad_export` |
-| 0.8.7 | Storage backend abstraction (prep) — `StorageBackend` interface, extract git as `GitBackend` |
-| 0.9.0 | Remote MCP hardening — per-token rate-limit policy, stress suite, metrics export |
-| 0.9.5 | Query power — FTS5, fuzzy entity matching, compound filters |
-| 0.9.7 | Object attributes — user-defined tags on extracted objects |
-| 1.0.0 | Stable release — API locked, npm published |
+- MIT license, pre-1.0, actively developed
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
