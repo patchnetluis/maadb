@@ -194,6 +194,26 @@ After design is confirmed (or in autonomous mode):
 6. Inspect \`_meta.warnings[]\` on sample-record responses — if intended-coarse values trip precision warnings, tighten the schema or adjust the sample input before proceeding
 7. Call \`maad_reindex\` if sample records were created
 8. Report: "Database deployed. X types, Y fields. Ready for data."
+9. **Register your own identity** as an agent record. Use the existence-check-then-create pattern — do **not** call \`maad_create\` blindly, it will collide on re-runs against an already-bootstrapped project:
+
+   \`\`\`
+   maad_get agt-architect
+     → if not found:
+       maad_create agent {
+         docId: "agt-architect",
+         name: "architect",
+         role: "MAAD Architect — bootstrapped this project's schema",
+         description: "Designed registry + schemas on <ISO date>",
+         status: "active",
+         created_at: <now ISO>
+       }
+     → if already exists:
+       You're re-running against a bootstrapped project. Skip the
+       create; optionally \`maad_update\` to refresh \`description\`
+       if you're reorganizing schemas.
+   \`\`\`
+
+   This persists provenance — queryable later as "which agent bootstrapped this project." Load-bearing once multiple architect instances operate (e.g., hosted deployments where each tenant brain gets its own bootstrap) or when compliance audits need design-time attribution.
 
 ## Bulk Data Import
 
