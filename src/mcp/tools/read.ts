@@ -188,7 +188,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
   }));
 
   server.registerTool('maad_changes_since', {
-    description: 'Polling delta — returns documents whose updated_at (with doc_id as tiebreak) is strictly greater than the supplied cursor. Omit `cursor` to start from the beginning. Response is deterministically ordered (updated_at ASC, doc_id ASC) and paginated via `nextCursor` + `hasMore`. Cursor is opaque — pass it back verbatim. Operation is "create" (first-version rows) or "update"; deletes are not emitted in 0.5.0.',
+    description: 'Polling delta. Returns records with updated_at > cursor, ordered (updated_at ASC, doc_id ASC). Omit cursor to start. Pass nextCursor back verbatim to paginate; hasMore signals more pages. Operation: create | update (deletes not emitted).',
     inputSchema: z.object({
       cursor: z.string().optional().describe('Opaque cursor from a previous response. Omit on first call.'),
       limit: z.number().int().positive().optional().describe('Max changes per page (default 100, max 1000).'),

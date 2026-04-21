@@ -122,7 +122,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
   });
 
   server.registerTool('maad_subscribe', {
-    description: 'Subscribes the current session to live-update notifications on durable writes. Optional filter: `docTypes` (array) restricts to listed types; `project` restricts to one project (defaults to the session\'s bound project in single-mode, or any whitelisted project in multi-mode). Emits `notifications/resources/updated` with `uri: maad://records/<docId>` plus extra params `{action, docId, docType, operation, updatedAt, project}`. Only fires on durable commits (0.6.10 signal) — subscribers never see events for non-durable writes or idempotent no-ops. One subscription per session — re-subscribe to change filter. Call `maad_changes_since` separately for historical catch-up.',
+    description: 'Subscribe the current session to live notifications on durable writes. Optional filters: docTypes (array), project (string). Emits notifications/resources/updated with uri=maad://records/<docId> + extra params. One subscription per session; re-subscribe to replace filter.',
     inputSchema: z.object({
       docTypes: z.array(z.string()).optional().describe('Allowlist of doc types; omit for all types'),
       project: z.string().optional().describe('Restrict to one project; defaults to session\'s bound scope'),
@@ -171,7 +171,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
  */
 export function registerReload(server: McpServer, ctx: InstanceCtx): number {
   server.registerTool('maad_instance_reload', {
-    description: 'Reloads the instance config from disk — picks up new projects, applies removals, and cancels sessions bound to removed projects. Requires admin role on every project in the session binding. Path/role mutations of existing projects are rejected until 0.9.0 eviction policy lands.',
+    description: 'Reloads instance.yaml from disk. Picks up added projects, evicts removed, cancels bound sessions. Admin on every bound project required. Path/role mutations rejected until 0.9.0.',
     inputSchema: z.object({}),
   }, async (_args, extra) => {
     const sessionId = resolveSessionId(extra);
@@ -207,7 +207,7 @@ export function registerReload(server: McpServer, ctx: InstanceCtx): number {
   });
 
   server.registerTool('maad_subscriptions', {
-    description: 'Returns the full live-subscription inventory across every session in this instance. Admin-only — the view is instance-wide and leaks session activity patterns, so it\'s gated to admin callers. Use for orchestrator-pattern workflows where a master agent delegates work based on who\'s listening, or for ops observability. Returns { totalSubscriptions, subscriptions[{sessionId, mode, activeProject, whitelist, subscription, bindingSource, lastActivityAt}], byProject, byDocType }. Note: until 0.7.0 Scoped Auth lands, sessionId is opaque — the mapping between sessionId and the agent identity that owns it lives in the consuming app (brain-app, etc.).',
+    description: 'Admin tool: returns live-subscription inventory across all sessions as { totalSubscriptions, subscriptions[], byProject, byDocType }. Requires admin on every project in the session binding.',
     inputSchema: z.object({}),
   }, async (_args, extra) => {
     const sessionId = resolveSessionId(extra);
