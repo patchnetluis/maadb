@@ -27,6 +27,10 @@ import { EnginePool } from '../instance/pool.js';
 import { SessionRegistry } from '../instance/session.js';
 import type { InstanceCtx } from './ctx.js';
 import { parseRole } from './roles.js';
+import { TokenStore } from '../auth/token-store.js';
+import { checkHttpAuthAtBoot } from './transport/auth.js';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import * as discoverTools from './tools/discover.js';
 import * as readTools from './tools/read.js';
 import * as writeTools from './tools/write.js';
@@ -88,10 +92,26 @@ export async function startServer(opts: ServeOptions): Promise<void> {
   initIdempotencyCache(readIdempotencyEnv());
   initRateLimiter(readRateLimitEnv());
 
+  // 0.7.0 — Load the token registry (HTTP+file mode) or null-out for stdio/synthetic.
+  // Boot-mode enforcement happens in the HTTP branch below; in stdio/synthetic
+  // the registry is irrelevant (no bearer channel). Parse errors at startup
+  // refuse to boot — operator sees the exact file path + js-yaml error.
+  let tokens: TokenStore | null = null;
+  if (instance.source === 'file' && instance.configPath) {
+    const instanceRoot = path.dirname(instance.configPath);
+    const loaded = await TokenStore.load(instanceRoot);
+    if (!loaded.ok) {
+      const messages = loaded.errors.map(e => `${e.code}: ${e.message}`).join('; ');
+      console.error(`MAAD MCP: token registry invalid: ${messages}`);
+      process.exit(1);
+    }
+    tokens = loaded.value;
+  }
+
   // Build the instance-scoped runtime context
   const pool = new EnginePool(instance);
   const sessions = new SessionRegistry(instance);
-  const ctx: InstanceCtx = { instance, pool, sessions };
+  const ctx: InstanceCtx = { instance, pool, sessions, tokens };
 
   // For the legacy synthetic path we eager-init the single engine so the
   // first tool call is fast and any startup errors surface immediately. In
@@ -140,6 +160,22 @@ export async function startServer(opts: ServeOptions): Promise<void> {
       console.error('MAAD MCP: --transport http requires HTTP config');
       process.exit(1);
     }
+
+    // 0.7.0 — Legacy single-bearer mode hard-removed (dec-maadb-071). HTTP
+    // requires _auth/tokens.yaml with ≥1 active entry. Stale MAAD_AUTH_TOKEN
+    // env config surfaces a distinctive LEGACY_BEARER_REMOVED error so
+    // operators see the migration hint before chasing a generic boot failure.
+    if (instance.source !== 'file' || !instance.configPath) {
+      console.error('MAAD MCP: --transport http requires --instance (synthetic --project mode is stdio-only in 0.7.0)');
+      process.exit(1);
+    }
+    const instanceRoot = path.dirname(instance.configPath);
+    const storeExists = existsSync(path.join(instanceRoot, '_auth', 'tokens.yaml'));
+    const bootErr = checkHttpAuthAtBoot(tokens!, storeExists, opts.http.authToken);
+    if (bootErr !== null) {
+      console.error(`MAAD MCP: ${bootErr}`);
+      process.exit(1);
+    }
     // One-time registration log using a throwaway count from a probe server.
     // In HTTP mode the real server instances are built per session.
     const { toolCount } = buildMcpServer();
@@ -166,7 +202,7 @@ export async function startServer(opts: ServeOptions): Promise<void> {
       keepAliveTimeoutMs: opts.http.keepAliveTimeoutMs,
       trustProxy: opts.http.trustProxy,
       idleMs: opts.http.idleMs,
-      authToken: opts.http.authToken,
+      tokens: tokens!,
       sessions: ctx.sessions,
       instance,
       serverFactory: () => buildMcpServer().server,

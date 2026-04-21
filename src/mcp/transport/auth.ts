@@ -1,25 +1,36 @@
 // ============================================================================
-// Bearer token auth for HTTP transport (0.5.0 R2)
+// Bearer auth for HTTP transport — 0.7.0 Scoped Auth & Identity
 //
-// Single shared secret model. Every HTTP request to /mcp must carry an
-// `Authorization: Bearer <token>` header; the token is constant-time-compared
-// against the value supplied at boot via MAAD_AUTH_TOKEN. Failed checks
-// return 401 UNAUTHORIZED with no detail about which check failed or what
-// token was presented.
+// Clients present `Authorization: Bearer <maad_pat_...>`. The plaintext is
+// hashed (SHA-256) and looked up in the TokenStore loaded from
+// `<instance-root>/_auth/tokens.yaml`. Failed lookups, revoked, and expired
+// tokens all map to a plain 401 on the wire — reason surfaces only in the
+// ops log (per dec-maadb-069 lock on failure shape).
 //
-// Non-goals (deferred to 0.8.5):
-//   - Per-connection role tiers / token→role mapping
-//   - Token rotation without restart
-//   - OAuth / JWT / any claims-based auth
+// Legacy single-bearer fallback is HARD-REMOVED in 0.7.0 per dec-maadb-071.
+// `MAAD_AUTH_TOKEN` without `tokens.yaml` → boot error LEGACY_BEARER_REMOVED.
+// No tokens.yaml at all → boot error TOKENS_FILE_MISSING.
+//
+// stdio has no bearer channel — the token registry is HTTP-only. Synthetic
+// (legacy --project) mode never reaches this module because it runs stdio.
 // ============================================================================
 
 import { timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 
-export type AuthFailureReason = 'missing' | 'invalid';
+import type { TokenStore } from '../../auth/token-store.js';
+import { hashPlaintext, looksLikeToken } from '../../auth/token-store.js';
+import type { TokenRecord } from '../../auth/types.js';
+
+export type AuthFailureReason =
+  | 'missing'
+  | 'malformed'
+  | 'unknown'
+  | 'revoked'
+  | 'expired';
 
 export type AuthResult =
-  | { ok: true }
+  | { ok: true; record: TokenRecord }
   | { ok: false; reason: AuthFailureReason };
 
 /**
@@ -40,55 +51,84 @@ function extractBearer(headerValue: string | string[] | undefined): string | und
 }
 
 /**
- * Constant-time comparison that is safe on unequal-length inputs.
- * timingSafeEqual throws on length mismatch, so we short-circuit but still
- * run a dummy compare to normalize timing regardless of which branch we took.
+ * Resolve the Authorization header against the token registry.
+ * Pure function over the request + store — no side effects, no logging
+ * here (caller handles log + response so remote_addr + trustProxy policy
+ * stays in the transport layer).
+ *
+ * Every failure reason maps to a plain 401 on the wire. The distinct codes
+ * are for ops-log diagnostics only.
  */
-function constantTimeEqual(a: string, b: string): boolean {
-  // Always allocate buffers of the same length based on the expected secret
-  // so that the dummy-compare on the mismatch path has stable timing.
+export function resolveToken(req: IncomingMessage, store: TokenStore, now: Date = new Date()): AuthResult {
+  const presented = extractBearer(req.headers.authorization);
+  if (presented === undefined) return { ok: false, reason: 'missing' };
+
+  if (!looksLikeToken(presented)) {
+    // Use a constant-time compare against a zero buffer of the same shape
+    // to normalize timing whether the token was well-formed or not.
+    const dummy = Buffer.alloc(presented.length);
+    const probe = Buffer.alloc(presented.length);
+    timingSafeEqual(dummy, probe);
+    return { ok: false, reason: 'malformed' };
+  }
+
+  const hash = hashPlaintext(presented);
+  const record = store.lookupByHash(hash);
+  if (!record) return { ok: false, reason: 'unknown' };
+  if (record.revokedAt !== undefined) return { ok: false, reason: 'revoked' };
+  if (record.expiresAt !== undefined && new Date(record.expiresAt).getTime() < now.getTime()) {
+    return { ok: false, reason: 'expired' };
+  }
+  return { ok: true, record };
+}
+
+/**
+ * Boot-time validation for HTTP mode. Enforces the 0.7.0 hard-removal of
+ * legacy single-bearer fallback: tokens.yaml MUST exist and carry ≥1 active
+ * entry, or the server refuses to start.
+ *
+ * Returns an error string (boot rejection) or null (safe to proceed).
+ *
+ * @param store       — result of TokenStore.load (may be empty)
+ * @param storeExists — whether _auth/tokens.yaml was found on disk
+ * @param legacyEnv   — value of MAAD_AUTH_TOKEN env, used ONLY to produce a
+ *                       distinctive error message when the operator is
+ *                       still running a 0.6.x-style deployment config
+ */
+export function checkHttpAuthAtBoot(
+  store: TokenStore,
+  storeExists: boolean,
+  legacyEnv: string | undefined,
+  now: Date = new Date(),
+): string | null {
+  if (!storeExists) {
+    if (legacyEnv !== undefined && legacyEnv.length > 0) {
+      return 'LEGACY_BEARER_REMOVED: MAAD_AUTH_TOKEN single-bearer mode was removed in 0.7.0. '
+        + 'Generate _auth/tokens.yaml via `maad auth issue-token --role=admin --name=<deployment> --projects=\'*\'` '
+        + 'and present the returned maad_pat_<hex> token in the Authorization header. '
+        + 'See docs/deploy/systemd.md auth section for the full migration recipe.';
+    }
+    return 'TOKENS_FILE_MISSING: HTTP mode requires _auth/tokens.yaml with at least one active token. '
+      + 'Generate one via `maad auth issue-token --role=admin --name=<deployment> --projects=\'*\'`.';
+  }
+  if (store.activeCount(now) === 0) {
+    return 'TOKENS_FILE_EMPTY: _auth/tokens.yaml has no active (non-revoked, non-expired) tokens. '
+      + 'Issue at least one via `maad auth issue-token` before starting HTTP mode.';
+  }
+  return null;
+}
+
+/**
+ * Legacy timing-equal helper retained for any non-auth callers that compare
+ * strings. Not used by the 0.7.0 auth path directly.
+ */
+export function constantTimeEqual(a: string, b: string): boolean {
   const aBuf = Buffer.from(a, 'utf8');
   const bBuf = Buffer.from(b, 'utf8');
   if (aBuf.length !== bBuf.length) {
-    // Still do a compare to normalize timing, then return false.
     const dummy = Buffer.alloc(bBuf.length);
     timingSafeEqual(dummy, bBuf);
     return false;
   }
   return timingSafeEqual(aBuf, bBuf);
-}
-
-/**
- * Validate the Authorization header on an incoming request.
- * Pure function over request headers — no side effects, no logging here
- * (caller handles log + response so remote_addr + trustProxy policy stay
- * in the transport layer).
- */
-export function validateBearer(req: IncomingMessage, expected: string): AuthResult {
-  const presented = extractBearer(req.headers.authorization);
-  if (presented === undefined) return { ok: false, reason: 'missing' };
-  if (!constantTimeEqual(presented, expected)) return { ok: false, reason: 'invalid' };
-  return { ok: true };
-}
-
-/**
- * Boot-time validation helper. Called from the CLI / server startup.
- * Returns an error string or null.
- */
-export function checkAuthTokenAtBoot(token: string | undefined): string | null {
-  if (!token || token.length === 0) {
-    return 'AUTH_TOKEN_REQUIRED: --transport http requires --auth-token or MAAD_AUTH_TOKEN';
-  }
-  return null;
-}
-
-/**
- * Boot-time warning helper. Short tokens are not rejected (dev convenience)
- * but are logged as a warning so operators notice.
- */
-export function shortTokenWarning(token: string): string | null {
-  if (token.length < 16) {
-    return `MAAD_AUTH_TOKEN is only ${token.length} chars; production deployments should use >=32 bytes (>=43 chars base64url). Allowed for dev convenience.`;
-  }
-  return null;
 }

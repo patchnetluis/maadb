@@ -15,6 +15,8 @@ import { ok, singleErr, type Result } from '../errors.js';
 import { roleSatisfies, minRole, type Role } from '../mcp/roles.js';
 import type { InstanceConfig } from './config.js';
 import { getProject } from './config.js';
+import type { TokenRecord } from '../auth/types.js';
+import { composeEffectiveRole } from '../auth/resolve.js';
 
 export type SessionMode = 'single' | 'multi';
 
@@ -60,6 +62,14 @@ export interface SessionState {
     project: string | null;
     createdAt: Date;
   };
+  /**
+   * 0.7.0 — The token record resolved from the Authorization header at
+   * session initialize (HTTP+registry mode only). undefined in stdio /
+   * synthetic / legacy modes (which don't have a bearer channel). Used by
+   * bindSingle/bindMulti for three-cap effective-role composition, and by
+   * audit log identity propagation (P3).
+   */
+  token?: TokenRecord;
 }
 
 export interface BindOptions {
@@ -225,7 +235,7 @@ export class SessionRegistry {
     const project = getProject(this.instance, projectName);
     if (!project) return singleErr('PROJECT_UNKNOWN', `Project "${projectName}" not declared in instance`);
 
-    const effective = this.resolveEffectiveRole(project.role, opts.as);
+    const effective = this.composeEffective(project.role, projectName, state.token, opts.as);
     if (!effective.ok) return effective;
 
     state.mode = 'single';
@@ -254,7 +264,7 @@ export class SessionRegistry {
     for (const name of projectNames) {
       const project = getProject(this.instance, name);
       if (!project) return singleErr('PROJECT_UNKNOWN', `Project "${name}" not declared in instance`);
-      const effective = this.resolveEffectiveRole(project.role, opts.as);
+      const effective = this.composeEffective(project.role, name, state.token, opts.as);
       if (!effective.ok) return effective;
       effectiveRoles.set(name, effective.value);
     }
@@ -267,13 +277,33 @@ export class SessionRegistry {
     return ok(state);
   }
 
-  private resolveEffectiveRole(projectRole: Role, requested?: Role): Result<Role> {
-    if (!requested) return ok(projectRole);
-    if (!roleSatisfies(projectRole, requested)) {
-      return singleErr('ROLE_UPGRADE_DENIED',
-        `Cannot bind as ${requested} — project role is ${projectRole}`);
+  /**
+   * Compose the effective role for a (project, token?, requested?) tuple.
+   * Three-cap when a token is present (HTTP+registry mode); two-cap legacy
+   * behavior when token is undefined (stdio, synthetic, or any path that
+   * never populated state.token).
+   */
+  private composeEffective(
+    projectRole: Role,
+    projectName: string,
+    token: TokenRecord | undefined,
+    requested?: Role,
+  ): Result<Role> {
+    if (token === undefined) {
+      // Legacy two-cap path — stdio/synthetic mode.
+      if (!requested) return ok(projectRole);
+      if (!roleSatisfies(projectRole, requested)) {
+        return singleErr('ROLE_UPGRADE_DENIED',
+          `Cannot bind as ${requested} — project role is ${projectRole}`);
+      }
+      return ok(minRole(projectRole, requested));
     }
-    return ok(minRole(projectRole, requested));
+    // Three-cap path — HTTP+registry mode.
+    const composed = composeEffectiveRole(projectRole, token, projectName, requested);
+    if (!composed.ok) {
+      return singleErr(composed.code, composed.message);
+    }
+    return ok(composed.role);
   }
 }
 

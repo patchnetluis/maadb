@@ -14,7 +14,9 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { logger } from '../../engine/logger.js';
 import { logAuthFailure, logPinRejected } from '../../logging.js';
-import { validateBearer } from './auth.js';
+import { resolveToken } from './auth.js';
+import type { TokenStore } from '../../auth/token-store.js';
+import type { TokenRecord } from '../../auth/types.js';
 import { validatePinHeader } from './pin.js';
 import type { SessionRegistry } from '../../instance/session.js';
 import type { InstanceConfig } from '../../instance/config.js';
@@ -38,11 +40,13 @@ export interface HttpTransportOptions {
    */
   idleMs: number;
   /**
-   * Bearer token required on every request. Compared constant-time against
-   * the Authorization header. Undefined disables auth (dev/testing only —
-   * production always sets this).
+   * 0.7.0 — Token registry for scoped auth. Production HTTP mode requires a
+   * non-null store with ≥1 active token (server.ts enforces via
+   * checkHttpAuthAtBoot before this transport is even instantiated). Tests
+   * and dev convenience may pass undefined to bypass auth entirely; when
+   * undefined, every request is accepted without a bearer check.
    */
-  authToken?: string | undefined;
+  tokens?: TokenStore | undefined;
   /**
    * Session registry for protocol-level state. HTTP transport fires destroy()
    * on its close, which fans out to whatever close handlers the server
@@ -147,13 +151,23 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
       // Middleware step 1: auth. Runs BEFORE session resolution so an
       // unauthenticated caller can never discover whether a session id
       // exists (404 SESSION_NOT_FOUND is reserved for authenticated callers).
-      if (opts.authToken !== undefined) {
-        const auth = validateBearer(req, opts.authToken);
-        if (!auth.ok) {
-          logAuthFailure({ remote_addr: remoteAddrFor(req, opts.trustProxy), reason: auth.reason });
+      // 0.7.0 — resolveToken replaces shared-secret validateBearer. Every
+      // failure reason maps to a plain 401; distinct codes surface only in
+      // the ops log. Success returns the TokenRecord, which we capture for
+      // session-creation binding below. If tokens is undefined (test/dev
+      // bypass), we skip auth entirely — production boot enforces presence.
+      let authedToken: TokenRecord | null = null;
+      if (opts.tokens !== undefined) {
+        const authOutcome = resolveToken(req, opts.tokens);
+        if (!authOutcome.ok) {
+          logAuthFailure({
+            remote_addr: remoteAddrFor(req, opts.trustProxy),
+            reason: authOutcome.reason === 'missing' ? 'missing' : 'invalid',
+          });
           writeJsonError(res, 401, 'UNAUTHORIZED', 'missing or invalid bearer token');
           return;
         }
+        authedToken = authOutcome.record;
       }
 
       // Middleware step 2: X-Maad-Pin-Project (0.6.8) — trusted-gateway
@@ -216,6 +230,7 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
       // New session: transport delegates ID generation to us (128-bit CSPRNG)
       const remoteAddr = remoteAddrFor(req, opts.trustProxy);
       const pinForClosure = pinnedProjectName;
+      const tokenForClosure = authedToken;
       // Forward-reference to the McpServer built below. Captured by the
       // onsessioninitialized closure so 0.6.11 live-notification registration
       // can fire `sendResourceUpdated` through the right per-session server.
@@ -229,7 +244,13 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
           // something to destroy — otherwise the fan-out chain (rate-limit
           // dispose, audit handlers) never runs. withSession may also
           // create(sid) lazily on first tool call; create() is idempotent.
-          opts.sessions.create(sid);
+          const state = opts.sessions.create(sid);
+          // 0.7.0 — Attach the authed token BEFORE any bindSingle/bindMulti
+          // call so the three-cap effective-role composition sees it. Subsequent
+          // requests on this session re-validate their bearer at the middleware
+          // layer; the state.token is a snapshot at initialize time for
+          // consistent effective-role resolution.
+          if (tokenForClosure !== null) state.token = tokenForClosure;
           // Gateway pin (0.6.8): if the pin header validated, bind the session
           // synchronously before any tool call can reach a handler. Rebind
           // protection lives in SessionRegistry.bindSingle (SESSION_PINNED

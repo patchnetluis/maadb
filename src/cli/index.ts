@@ -12,7 +12,6 @@ import { cmdCreate, cmdUpdate } from './commands/write.js';
 import { cmdInit, cmdValidate, cmdReindex, cmdParse } from './commands/maintain.js';
 import { cmdHistory, cmdAudit } from './commands/audit.js';
 import { startServer } from '../mcp/server.js';
-import { checkAuthTokenAtBoot, shortTokenWarning } from '../mcp/transport/auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -132,15 +131,8 @@ async function cmdServe(): Promise<void> {
     process.exit(1);
   }
 
-  if (transport === 'http') {
-    const err = checkAuthTokenAtBoot(authToken);
-    if (err) {
-      console.error(`Error: ${err}`);
-      process.exit(1);
-    }
-    const warn = shortTokenWarning(authToken!);
-    if (warn) console.error(`Warning: ${warn}`);
-  }
+  // 0.7.0 — HTTP boot-mode enforcement moved to server.ts (needs TokenStore).
+  // CLI just passes authToken through; server validates via checkHttpAuthAtBoot.
 
   const base = {
     role,
