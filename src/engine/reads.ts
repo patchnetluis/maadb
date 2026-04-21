@@ -234,37 +234,37 @@ export function schemaInfo(ctx: EngineContext, dt: DocType): Result<SchemaInfoRe
       if (field.target) typeStr += ` -> ${field.target as string}`;
     }
 
-    const format = field.format ?? (field.type === 'amount' ? '<number> <currency> (e.g. 1250.00 USD)' : null);
+    const format = field.format ?? (field.type === 'amount' ? '<number> <currency> (e.g. 1250.00 USD)' : undefined);
 
+    // 0.7.0 — build entry with only the populated fields. Pre-0.7.0 serialized
+    // null placeholders for every optional field, bloating the response.
     const entry: SchemaInfoResult['fields'][number] = {
       name,
       type: typeStr,
       required: schema.required.includes(name),
       indexed: field.index,
-      values: field.values,
-      target: field.target as string | null,
-      format,
-      default: field.defaultValue,
     };
-    // 0.6.7: expose precision hints on date fields so consumers can render
-    // per displayPrecision and trace enforcement contract.
+    if (field.values !== null && field.values !== undefined) entry.values = field.values;
+    if (field.target !== null && field.target !== undefined) entry.target = field.target as string;
+    if (format !== undefined) entry.format = format;
+    if (field.defaultValue !== null && field.defaultValue !== undefined) entry.default = field.defaultValue;
+    // 0.6.7 precision hints — already omitted when null/unset.
     if (field.storePrecision !== null) entry.storePrecision = field.storePrecision;
     if (field.onCoarser !== null) entry.onCoarser = field.onCoarser;
     if (field.displayPrecision !== null) entry.displayPrecision = field.displayPrecision;
     fields.push(entry);
   }
 
-  const templateHeadings = schema.template
-    ? schema.template.map(t => ({ level: t.level, text: t.text }))
-    : null;
-
-  return ok({
+  const result: SchemaInfoResult = {
     type: dt as string,
     idPrefix: regType.idPrefix as string,
     schemaRef: regType.schemaRef as string,
     fields,
-    templateHeadings,
-  });
+  };
+  if (schema.template) {
+    result.templateHeadings = schema.template.map(t => ({ level: t.level, text: t.text }));
+  }
+  return ok(result);
 }
 
 export function aggregate(ctx: EngineContext, query: AggregateQuery): Result<AggregateResult> {

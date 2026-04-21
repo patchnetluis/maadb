@@ -286,17 +286,21 @@ export interface SchemaInfoResult {
     type: string;
     required: boolean;
     indexed: boolean;
-    values: string[] | null;
-    target: string | null;
-    format: string | null;
-    default: unknown;
-    // 0.6.7 — omitted when null/unset; only present on date fields with
-    // declared precision. Consumers may render using displayPrecision.
+    // 0.7.0 — fields below are optional; serialized only when non-null.
+    // Pre-0.7.0 shipped null placeholders that bloated the response without
+    // carrying information. Consumers reading these fields should treat
+    // `undefined` and the previous `null` as equivalent.
+    values?: string[];
+    target?: string;
+    format?: string;
+    default?: unknown;
+    // 0.6.7 — precision hints, omitted when null/unset.
     storePrecision?: string;
     onCoarser?: 'warn' | 'error';
     displayPrecision?: string;
   }>;
-  templateHeadings: Array<{ level: number; text: string }> | null;
+  // 0.7.0 — omitted when the schema has no template.
+  templateHeadings?: Array<{ level: number; text: string }>;
 }
 
 export interface ValidationReport {
