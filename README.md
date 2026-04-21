@@ -1,4 +1,4 @@
-# MAADB — Markdown As A Database
+# MAADb — Markdown As A Database
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%E2%89%A522-brightgreen.svg)](package.json)
@@ -6,20 +6,22 @@
 [![Tests](https://img.shields.io/badge/tests-575%20passing-brightgreen.svg)](tests)
 [![Version](https://img.shields.io/badge/version-0.6.8-purple.svg)](Version.md)
 
-> **Your data stays in markdown. The engine makes it queryable.**
+> **Markdown is the database. The engine makes it queryable.**
 
-MAADB treats markdown files as the canonical data store, not the presentation layer. YAML frontmatter defines structure, inline annotations extract entities, headings create addressable sections, and the engine builds a queryable pointer-only index over the lot — then serves everything to LLM agents through MCP.
+MAADb stores records as markdown files with YAML frontmatter for structured fields and body content for narrative. The engine validates schemas, builds a lookup index, and serves the whole thing to LLM agents over MCP. Your data stays in files you can read, grep, and version-control — not behind an opaque database server.
 
-Designed for document-centric data where structured fields and narrative context need to live together in the same record.
+## Why MAADb
 
-## Why MAADB
+- **Markdown is canonical.** Open any record in any text editor — your data is exactly what's on screen, no translation layer.
+- **Git is the audit trail.** Every write is a commit. `maad_history` shows the full change history for any record.
+- **LLM-native.** Ships with 22+ MCP tools for discovery, read, write, and maintenance. Designed for agent workflows from the start.
+- **Optional schemas.** Add YAML schemas when you want structure, skip them when you don't. Validation runs on writes, never on old records.
+- **The index is a speed layer.** SQLite stores pointers into your markdown files. Delete it and it rebuilds — your data never depends on the index surviving.
+- **Safe under concurrent writes.** Clean shutdown, lock recovery, rate limiting, retry-safe operations all built in.
 
-- **Markdown is canonical.** No impedance mismatch between your records and your view of them. Open any file in any editor — everything is human-readable.
-- **Git is the audit trail.** Every write is a commit. `maad_history` shows full provenance for any document.
-- **LLM-native.** MCP server ships with 22+ tools for discovery, read, write, and maintenance. Designed for agent workflows from the ground up.
-- **Schema-enforced, not schema-heavy.** YAML schemas declare types, relationships, and precision contracts. Enforcement fires on write, never on read — historical data stays untouched when contracts tighten.
-- **Pointer-only index.** SQLite stores file pointers and extracted object references. Content always reads from markdown. Index is rebuildable from source; never load-bearing.
-- **Concurrent-safe.** FIFO write mutex, idempotency keys, stale-lock recovery, rate limiting, graceful shutdown. Production-hardened.
+## Where MAADb fits
+
+MAADb works as a context engine for AI agents — a place to hold the information they need to keep working, when that context still needs structure. Records are typed, relationships are queryable through MCP, and the data stays as readable markdown on disk. Common shapes: agent memory, project state, ongoing case files. For high-throughput transactional data or pure semantic retrieval at scale, purpose-built tools serve better.
 
 ## Quick example
 
@@ -107,7 +109,7 @@ The Architect skill handles type discovery, schema design, registry creation, an
 
 ## Remote / hosted deployment
 
-MAADB serves over HTTP/SSE for multi-session hosted deployments. One process handles many concurrent client sessions with bearer-token auth at the handshake, concurrent reads, polling delta ([`maad_changes_since`](docs/change-feed.md)), and an unauthenticated `/healthz` liveness probe. TLS terminated upstream at a reverse proxy.
+MAADb serves over HTTP/SSE for multi-session hosted deployments. One process handles many concurrent client sessions with bearer-token auth at the handshake, concurrent reads, polling delta ([`maad_changes_since`](docs/change-feed.md)), and an unauthenticated `/healthz` liveness probe. TLS terminated upstream at a reverse proxy.
 
 ```bash
 MAAD_AUTH_TOKEN=$(openssl rand -base64 48 | tr -d '=' | tr '+/' '-_') \
@@ -131,7 +133,7 @@ MCP roles control what tools an agent can use. Set via `--role` at server startu
 | `writer` | reader + create, update, validate, bulk_create, bulk_update | Standard agents that read and write records |
 | `admin` | writer + delete, reindex, reload, health | Project setup, schema changes, maintenance |
 
-Under stdio, roles are trust-based — agents with filesystem access can bypass MCP. Under HTTP transport, the bearer token authenticates the caller and the role attached to the project binding governs the visible tool set. Per-token role tiers are on the roadmap (0.6.0).
+Under stdio (local subprocess), the agent has filesystem access anyway, so role enforcement is advisory — the trust boundary is the host machine. Under HTTP transport, the bearer token is checked at the handshake and the role attached to the project binding decides which tools are visible. Per-token role tiers are on the roadmap (0.6.0).
 
 ## Project layout
 
@@ -155,18 +157,6 @@ my-project/
 
 **Convention:** `_` prefix = engine-managed. `data/` = your records. Records never live at the project root.
 
-## Project archetypes
-
-MAADB supports different project patterns. The Architect skill guides schema design based on the archetype.
-
-| Archetype | Data flow | Examples |
-|-----------|-----------|---------|
-| **Living database** | Read + write, ongoing records | CRM, job tracker, case management |
-| **Static catalog** | Import once, query often | Research papers, book collection, product catalog |
-| **Accumulation log** | Append-heavy, time-series | Expense tracker, meeting notes, daily logs |
-| **Analysis project** | Import + cross-reference | Historical records, competitive research, audit corpus |
-| **Agent memory** | Agent-written, agent-read | Preferences, learned patterns, project context |
-
 ## MCP tools
 
 All tools return `{ ok: true, data: {...} }` or `{ ok: false, errors: [...] }`. Call `maad_schema <type>` for full field definitions before writing.
@@ -187,9 +177,9 @@ In multi-project mode, session tools are always available pre-bind: `maad_projec
 
 ## Current state
 
-**v0.6.8 — Gateway Session Pinning.** HTTP transport honors a new `X-Maad-Pin-Project: <name>` header at MCP `initialize` — the session is bound to the named project synchronously before any tool call reaches a handler, and any subsequent `maad_use_project` / `maad_use_projects` attempt rejects with a new `SESSION_PINNED` error. Enables trusted-gateway multi-tenant hosting patterns (per-user sub-projects under one engine process) without requiring the gateway to parse MCP JSON-RPC. Fail-safe: absent header = identical behavior to 0.6.7; stdio is untouched. Builds on the 0.6.7 precision contract and the 0.5.0 remote transport. 575 tests passing.
+**Current:** v0.6.8 — gateway session pinning for trusted multi-tenant hosting. 575 tests passing.
 
-See [Version.md](Version.md) for full release history and [ROADMAP.md](ROADMAP.md) for the path to 1.0.
+See [Version.md](Version.md) for the full release history and [ROADMAP.md](ROADMAP.md) for the path to 1.0.
 
 ## Stack
 
