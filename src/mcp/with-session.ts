@@ -71,10 +71,13 @@ export async function withEngine(
   let roleForLog: string | null = null;
 
   // finalize() is called once per request, on the single return path. It
-  // attaches _meta.request_id, inspects the response body for logging, and
-  // emits the tool_call ops line.
+  // attaches _meta.request_id (opt-in via MAAD_EMIT_REQUEST_ID=true since
+  // 0.7.0), inspects the response body for logging, and emits the tool_call
+  // ops line. The log line always carries request_id regardless of stamping
+  // — emission only affects the wire response, not diagnostics.
+  const emitRequestId = process.env.MAAD_EMIT_REQUEST_ID === 'true';
   const finalize = (response: McpToolResponse): McpToolResponse => {
-    const stamped = attachMeta(response, { request_id: requestId });
+    const stamped = emitRequestId ? attachMeta(response, { request_id: requestId }) : response;
     const latencyMs = Date.now() - startedMs;
     const { result, errorCode } = inspectResponse(stamped);
     logToolCall({
