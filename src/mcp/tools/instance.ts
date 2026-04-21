@@ -14,6 +14,7 @@ import type { InstanceCtx } from '../ctx.js';
 import { performInstanceReload } from '../instance-reload.js';
 import { roleSatisfies } from '../roles.js';
 import { maadError } from '../../errors.js';
+import { collectSubscriptions } from '../notifications.js';
 
 const ROLE_ENUM = z.enum(['reader', 'writer', 'admin']);
 
@@ -205,5 +206,28 @@ export function registerReload(server: McpServer, ctx: InstanceCtx): number {
     }, 'maad_instance_reload');
   });
 
-  return 1;
+  server.registerTool('maad_subscriptions', {
+    description: 'Returns the full live-subscription inventory across every session in this instance. Admin-only — the view is instance-wide and leaks session activity patterns, so it\'s gated to admin callers. Use for orchestrator-pattern workflows where a master agent delegates work based on who\'s listening, or for ops observability. Returns { totalSubscriptions, subscriptions[{sessionId, mode, activeProject, whitelist, subscription, bindingSource, lastActivityAt}], byProject, byDocType }. Note: until 0.7.0 Scoped Auth lands, sessionId is opaque — the mapping between sessionId and the agent identity that owns it lives in the consuming app (brain-app, etc.).',
+    inputSchema: z.object({}),
+  }, async (_args, extra) => {
+    const sessionId = resolveSessionId(extra);
+    const callerState = ctx.sessions.get(sessionId);
+    if (!callerState || callerState.mode === null) {
+      return errorResponse([maadError('SESSION_UNBOUND',
+        'Session is not bound to any project. Call maad_use_project(s) before maad_subscriptions.')]);
+    }
+    // Admin on EVERY project in the binding — same model as maad_instance_reload.
+    // The tool leaks instance-wide state, so require admin across the caller's full scope.
+    for (const [projectName, role] of callerState.effectiveRoles) {
+      if (!roleSatisfies(role, 'admin')) {
+        return errorResponse([maadError('INSUFFICIENT_ROLE',
+          `maad_subscriptions requires admin on every project in the session binding; session has "${role}" on "${projectName}".`)]);
+      }
+    }
+
+    const inventory = collectSubscriptions(ctx.sessions);
+    return successResponse(inventory, 'maad_subscriptions');
+  });
+
+  return 2;
 }

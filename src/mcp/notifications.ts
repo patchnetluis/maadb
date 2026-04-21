@@ -128,3 +128,83 @@ export async function notifyWrite(ctx: InstanceCtx, event: ChangeEvent): Promise
     }
   }
 }
+
+/**
+ * 0.6.12 — Inventory of active subscriptions across an instance. Produced
+ * by `maad_subscriptions` (admin-only). Extracted here so the aggregation
+ * logic is unit-testable without spinning up a full MCP server.
+ *
+ * `byProject` reflects "who would receive an event for project X": single-mode
+ * sessions bin under their activeProject; multi-mode sessions without an
+ * explicit project filter bin under every whitelisted project; sessions with
+ * an explicit filter bin only under that project.
+ *
+ * `byDocType` uses `*` as the any-type bucket (subscribers that omitted the
+ * docTypes filter) so admins can tell at a glance how many "firehose" vs
+ * "type-narrowed" subscribers are active.
+ */
+export interface SubscriptionInventoryEntry {
+  sessionId: string;
+  mode: string | null;
+  activeProject: string | null;
+  whitelist: string[] | null;
+  subscription: { docTypes: string[] | null; project: string | null; createdAt: string };
+  bindingSource: string | null;
+  lastActivityAt: string;
+}
+
+export interface SubscriptionInventory {
+  totalSubscriptions: number;
+  subscriptions: SubscriptionInventoryEntry[];
+  byProject: Record<string, number>;
+  byDocType: Record<string, number>;
+}
+
+export function collectSubscriptions(sessions: InstanceCtx['sessions']): SubscriptionInventory {
+  const subscriptions: SubscriptionInventoryEntry[] = [];
+  const byProject: Record<string, number> = {};
+  const byDocType: Record<string, number> = {};
+
+  for (const state of sessions.snapshot()) {
+    if (!state.subscription) continue;
+    subscriptions.push({
+      sessionId: state.sessionId,
+      mode: state.mode,
+      activeProject: state.activeProject ?? null,
+      whitelist: state.whitelist ?? null,
+      subscription: {
+        docTypes: state.subscription.docTypes,
+        project: state.subscription.project,
+        createdAt: state.subscription.createdAt.toISOString(),
+      },
+      bindingSource: state.bindingSource,
+      lastActivityAt: state.lastActivityAt.toISOString(),
+    });
+
+    const explicitProject = state.subscription.project;
+    if (explicitProject !== null) {
+      byProject[explicitProject] = (byProject[explicitProject] ?? 0) + 1;
+    } else if (state.mode === 'single' && state.activeProject) {
+      byProject[state.activeProject] = (byProject[state.activeProject] ?? 0) + 1;
+    } else if (state.mode === 'multi' && state.whitelist) {
+      for (const p of state.whitelist) {
+        byProject[p] = (byProject[p] ?? 0) + 1;
+      }
+    }
+
+    if (state.subscription.docTypes === null) {
+      byDocType['*'] = (byDocType['*'] ?? 0) + 1;
+    } else {
+      for (const t of state.subscription.docTypes) {
+        byDocType[t] = (byDocType[t] ?? 0) + 1;
+      }
+    }
+  }
+
+  return {
+    totalSubscriptions: subscriptions.length,
+    subscriptions,
+    byProject,
+    byDocType,
+  };
+}

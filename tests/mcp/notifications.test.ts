@@ -25,6 +25,7 @@ import {
   unregisterNotifier,
   notifierCount,
   __resetNotifiers,
+  collectSubscriptions,
   type ChangeEvent,
 } from '../../src/mcp/notifications.js';
 
@@ -239,5 +240,91 @@ describe('Live notifications — registry + filter matching', () => {
     // Duplicate create is idempotent — no double-fire.
     ctx.sessions.create('sess-created');
     expect(created).toEqual(['sess-created']);
+  });
+});
+
+describe('0.6.12 — collectSubscriptions inventory aggregation', () => {
+  it('empty: totalSubscriptions=0, empty buckets', () => {
+    const ctx = makeCtx(['alpha']);
+    const inv = collectSubscriptions(ctx.sessions);
+    expect(inv.totalSubscriptions).toBe(0);
+    expect(inv.subscriptions).toEqual([]);
+    expect(inv.byProject).toEqual({});
+    expect(inv.byDocType).toEqual({});
+  });
+
+  it('sessions without subscriptions are excluded', () => {
+    const ctx = makeCtx(['alpha']);
+    ctx.sessions.create('sess-unbound');
+    ctx.sessions.create('sess-bound-no-sub');
+    ctx.sessions.bindSingle('sess-bound-no-sub', 'alpha');
+
+    const inv = collectSubscriptions(ctx.sessions);
+    expect(inv.totalSubscriptions).toBe(0);
+  });
+
+  it('byDocType uses * bucket for any-type subscribers', () => {
+    const ctx = makeCtx(['alpha']);
+    ctx.sessions.create('sess-a');
+    ctx.sessions.bindSingle('sess-a', 'alpha');
+    ctx.sessions.get('sess-a')!.subscription = { docTypes: null, project: null, createdAt: new Date() };
+
+    ctx.sessions.create('sess-b');
+    ctx.sessions.bindSingle('sess-b', 'alpha');
+    ctx.sessions.get('sess-b')!.subscription = { docTypes: ['note', 'journal_entry'], project: null, createdAt: new Date() };
+
+    const inv = collectSubscriptions(ctx.sessions);
+    expect(inv.totalSubscriptions).toBe(2);
+    expect(inv.byDocType['*']).toBe(1);
+    expect(inv.byDocType['note']).toBe(1);
+    expect(inv.byDocType['journal_entry']).toBe(1);
+  });
+
+  it('byProject: explicit filter > single-mode default', () => {
+    const ctx = makeCtx(['alpha', 'beta']);
+    // Single-mode on alpha, no explicit filter → should count under alpha
+    ctx.sessions.create('sess-default');
+    ctx.sessions.bindSingle('sess-default', 'alpha');
+    ctx.sessions.get('sess-default')!.subscription = { docTypes: null, project: null, createdAt: new Date() };
+
+    // Single-mode on alpha, EXPLICIT filter for beta → should count under beta
+    ctx.sessions.create('sess-override');
+    ctx.sessions.bindSingle('sess-override', 'alpha');
+    ctx.sessions.get('sess-override')!.subscription = { docTypes: null, project: 'beta', createdAt: new Date() };
+
+    const inv = collectSubscriptions(ctx.sessions);
+    expect(inv.byProject['alpha']).toBe(1);
+    expect(inv.byProject['beta']).toBe(1);
+  });
+
+  it('byProject: multi-mode session with null filter bins under every whitelisted project', () => {
+    const ctx = makeCtx(['alpha', 'beta', 'gamma']);
+    ctx.sessions.create('sess-multi');
+    ctx.sessions.bindMulti('sess-multi', ['alpha', 'beta']);
+    ctx.sessions.get('sess-multi')!.subscription = { docTypes: null, project: null, createdAt: new Date() };
+
+    const inv = collectSubscriptions(ctx.sessions);
+    expect(inv.byProject['alpha']).toBe(1);
+    expect(inv.byProject['beta']).toBe(1);
+    expect(inv.byProject['gamma']).toBeUndefined(); // not in whitelist
+  });
+
+  it('entries carry sessionId + subscription + session state for orchestrator introspection', () => {
+    const ctx = makeCtx(['alpha']);
+    ctx.sessions.create('sess-probe');
+    ctx.sessions.bindSingle('sess-probe', 'alpha');
+    const now = new Date('2026-04-21T12:00:00Z');
+    ctx.sessions.get('sess-probe')!.subscription = { docTypes: ['task'], project: null, createdAt: now };
+
+    const inv = collectSubscriptions(ctx.sessions);
+    expect(inv.subscriptions.length).toBe(1);
+    const entry = inv.subscriptions[0]!;
+    expect(entry.sessionId).toBe('sess-probe');
+    expect(entry.mode).toBe('single');
+    expect(entry.activeProject).toBe('alpha');
+    expect(entry.subscription.docTypes).toEqual(['task']);
+    expect(entry.subscription.project).toBe(null);
+    expect(entry.subscription.createdAt).toBe(now.toISOString());
+    expect(entry.bindingSource).toBe('client_tool');
   });
 });

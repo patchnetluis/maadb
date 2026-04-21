@@ -1,9 +1,25 @@
 ---
 enabled: true
-current: 0.6.11
+current: 0.6.12
 ---
 
 # Version History
+
+## 0.6.12 — 2026-04-21
+Aggregate Subscription Visibility (fup-2026-077). New admin-only tool `maad_subscriptions` returns the full live-subscription inventory across every session in the instance: `{totalSubscriptions, subscriptions[{sessionId, mode, activeProject, whitelist, subscription, bindingSource, lastActivityAt}], byProject, byDocType}`. Pairs with a new cheap `subscribed` counter on `maad_health.sessions` so operators can grep `subscribed > 0` to confirm push is in use without pulling the full inventory.
+
+`byProject` reflects "who would receive an event for project X" — single-mode sessions bin under their activeProject; multi-mode sessions without an explicit project filter bin under every whitelisted project; sessions with an explicit filter bin only under the named project. `byDocType` uses `*` as the any-type bucket so admins can tell firehose subscribers from type-narrowed ones at a glance.
+
+Admin role gate inline in the handler (engine-less tool pattern, same as `maad_instance_reload`): requires admin role on EVERY project in the caller's session binding. Least privilege — the view is instance-wide and leaks subscription activity patterns across tenants in multi-project deployments.
+
+Limitation until 0.7.0 Scoped Auth lands: `sessionId` is opaque — the mapping between a sessionId and the agent identity that owns it lives in the consuming app (brain-app, orchestrator, etc.). 0.7.0 token identity fills that gap and `maad_subscriptions` becomes richer for free when tokens ship — each subscription entry will carry the token-claimed identity alongside the opaque sessionId.
+
+Use cases unlocked:
+- **Orchestrator pattern:** master-dev agent calls `maad_subscriptions` before delegating work — picks which subscriber agent to hand off to based on who's listening for the relevant docType in the relevant project.
+- **Ops observability:** `maad_health` grep for `subscribed > 0` confirms push is wired; `maad_subscriptions` full inventory for deep inspection (e.g., pairing `lastActivityAt` with a low subscriber count to spot zombie sessions before the idle sweeper gets them).
+- **Fleet coordination:** master agent subscribes to everything in its whitelist, uses `maad_subscriptions` to see the current fan-out graph.
+
+Aggregation logic extracted to `collectSubscriptions(sessions)` in `src/mcp/notifications.ts` so it's unit-testable without spinning up a full MCP server. 5 new tests covering empty-state, subscribed vs unbound sessions filter, `*` bucket for any-type subscribers, explicit-project-override-single-default, and multi-mode binning across whitelist. 617 total passing (baseline 611 at 0.6.11, +5 + 1 trivial refactor). `tsc --noEmit` clean. No new dependencies.
 
 ## 0.6.11 — 2026-04-21
 Live Notifications (fup-2026-035). New reader-level tools `maad_subscribe({docTypes?, project?})` and `maad_unsubscribe()` register a per-session filter on `SessionState.subscription`. After every durable write (0.6.10 commit signal confirms `writeDurable:true`), the MCP tool handler fans out `notifications/resources/updated` to every subscribed session whose filter matches the event. Emitted payload carries a synthetic `uri: maad://records/<docId>` (satisfies the MCP-spec required field) plus extra params `{action, docId, docType, project, updatedAt}` — clients that only read `uri` still get a valid notification; clients that read params get the typed ChangeEvent shape. This is the push-based alternative to polling `maad_changes_since`, unblocking consistent multi-agent project-work patterns where one agent's write should propagate to other active sessions watching the same project without round-tripping a cursor.

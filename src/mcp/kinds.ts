@@ -60,6 +60,7 @@ export const ENGINE_LESS_TOOLS: ReadonlySet<string> = new Set([
   'maad_instance_reload',
   'maad_subscribe',
   'maad_unsubscribe',
+  'maad_subscriptions',
 ]);
 
 // Assert the three sets are disjoint. A tool belongs to exactly one bucket.

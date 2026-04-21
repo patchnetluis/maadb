@@ -76,6 +76,11 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       ? getTransportSnapshot(ctx.sessions.size(), pinnedCount)
       : null;
 
+    // 0.6.12 — subscribed-session counter for cheap observability. Admins
+    // grep `subscribed > 0` to confirm push-based delivery is in use at all;
+    // full inventory is the admin-only maad_subscriptions tool.
+    const subscribedCount = ctx.sessions.snapshot().filter(s => s.subscription !== undefined).length;
+
     // 0.6.9 — instance reload stats, always included. Operators watching
     // hot-reload behavior (cohort expansion, tenant churn) filter on this
     // block to verify their last reload landed + projectCount is current.
@@ -93,9 +98,12 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       projectsRemoved: reloadStats.projectsRemoved,
     };
 
+    const sessionsBlock = telemetry
+      ? { ...telemetry.sessions, subscribed: subscribedCount }
+      : { subscribed: subscribedCount };
     const payload = telemetry
-      ? { ...health, provenance: provMode, transport: telemetry.transport, sessions: telemetry.sessions, instance: instanceBlock }
-      : { ...health, provenance: provMode, instance: instanceBlock };
+      ? { ...health, provenance: provMode, transport: telemetry.transport, sessions: sessionsBlock, instance: instanceBlock }
+      : { ...health, provenance: provMode, sessions: sessionsBlock, instance: instanceBlock };
     return successResponse(payload, 'maad_health');
   }));
 
