@@ -1,5 +1,7 @@
 # MAADB Roadmap
 
+> **Forward-looking plans moved to [Version.md](Version.md) §Planned (as of v0.7.0).** The Planned block below is preserved for historical context — slot numbers have since shifted (e.g. 0.6.0 Scoped Auth shipped as v0.7.0, 0.6.5 Live Notifications shipped as v0.6.11). See the [v0.7.0 optimization-track decision](https://github.com/maadb/maadb) for the current shape. Shipped sections are honest release history and stay here.
+
 ## Shipped
 
 ### v0.1.x — Foundation (2026-04-06)
@@ -94,13 +96,15 @@ Delivered in five phases (P1–P5) on branch `feat/0.6.7-schema-precision`. P1 (
 
 ---
 
-## Current: v0.6.8
+## Current: v0.7.0
 
-See Shipped block above.
+Scoped Auth & Identity + response hygiene. See [Version.md](Version.md) for the full entry.
 
 ---
 
-## Planned
+## Planned (historical — superseded by [Version.md §Planned](Version.md))
+
+Slot numbers and scope in the sections below predate the v0.7.0 optimization-track resequence. Version.md is the canonical forward-looking plan as of 2026-04-21.
 
 ### 0.5.1 — Deployment Workflow
 

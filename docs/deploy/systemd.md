@@ -37,13 +37,20 @@ sudo chown root:maad /etc/maad && sudo chmod 750 /etc/maad
 
 ## 2. Generate a bearer token
 
-The HTTP transport refuses to start without `MAAD_AUTH_TOKEN`. Generate an opaque token with real entropy — this is the single shared secret between every authorized client and the server.
+**0.7.0+:** HTTP transport requires `_auth/tokens.yaml` (in the instance root) with at least one active token. Legacy single-bearer mode (`MAAD_AUTH_TOKEN` as a shared secret) was hard-removed in 0.7.0 — see `docs/specs/0.7.0-scoped-auth.md` and `dec-maadb-071` for rationale.
+
+Issue a bearer from the build machine or droplet using the CLI. Plaintext is returned ONCE; the server persists only the SHA-256 hash.
 
 ```bash
-openssl rand -base64 48 | tr -d '=' | tr '+/' '-_'
+node /opt/maad/maadb/dist/cli.js --instance /opt/maad/instance.yaml auth issue-token \
+  --role=admin --name='primary-gateway' --projects='*' --agent=agt-gateway
 ```
 
-Rotation is a restart: change the value in `/etc/maad/env`, restart the service. Clients update their copy out-of-band. Per-client tokens and rotation-without-restart are on the roadmap (0.8.5).
+Output on stdout is the plaintext `maad_pat_<32hex>`. Capture it; store it securely on the client side (e.g. another env var in a gateway's deployment). Set it as the client's `Authorization: Bearer <plaintext>` header — or, if the client is itself a MAADb engine connecting to another, set its `MAAD_AUTH_TOKEN` env var to the plaintext. The env key stays the same; it's still a bearer — just validated against the registry now.
+
+Rotate without losing the slot via `maad auth rotate-token --id=tok-<id>` (returns new plaintext, revokes old). Revoke at end-of-life via `maad auth revoke-token --id=tok-<id>`. List active tokens via `maad auth list-tokens`.
+
+Hot reload after editing tokens.yaml: `sudo systemctl reload maad` (SIGHUP re-parses both instance.yaml and tokens.yaml in-place without restarting).
 
 ## 3. Write the environment file
 
@@ -52,8 +59,15 @@ Rotation is a restart: change the value in `/etc/maad/env`, restart the service.
 MAAD_TRANSPORT=http
 MAAD_HTTP_HOST=127.0.0.1
 MAAD_HTTP_PORT=7733
-MAAD_AUTH_TOKEN=<paste-the-token-from-step-2>
 MAAD_INSTANCE=/opt/maad/instance.yaml
+
+# 0.7.0+ — MAAD_AUTH_TOKEN is only set on CLIENTS (e.g. brain-app) as the
+# plaintext bearer they present. The server's tokens.yaml at
+# <instance-root>/_auth/tokens.yaml is the source of truth. If the server
+# sees MAAD_AUTH_TOKEN set without a companion tokens.yaml it refuses to
+# start with LEGACY_BEARER_REMOVED (hard-removed in 0.7.0).
+# MAAD_COMMIT_IDENTITY=true (default) appends role/token/agent lines to git
+# commit messages; set to "false" to opt out.
 
 # Optional — defaults are sensible, tune for your environment
 MAAD_SESSION_IDLE_MS=1800000

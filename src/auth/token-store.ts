@@ -125,6 +125,55 @@ export class TokenStore {
   /** Absolute path to the backing file. */
   path(): string { return this.filePath; }
 
+  /**
+   * 0.7.0 — Re-read tokens.yaml from disk and swap the in-memory indexes
+   * in-place. Captures of the TokenStore reference stay valid (so the HTTP
+   * transport doesn't need a getter). Parse errors leave the existing
+   * in-memory state untouched. Called by the SIGHUP handler alongside
+   * instance reload.
+   */
+  async reload(): Promise<Result<{ total: number; active: number }>> {
+    if (!existsSync(this.filePath)) {
+      // File was removed — empty the store. Same boot semantics as an
+      // absent file (HTTP transport keeps running; next lookup misses).
+      this.records = [];
+      this.byHash.clear();
+      this.byId.clear();
+      this.registryName = undefined;
+      return ok({ total: 0, active: 0 });
+    }
+    let raw: string;
+    try {
+      raw = await readFile(this.filePath, 'utf8');
+    } catch (e) {
+      return singleErr('TOKENS_FILE_INVALID',
+        `Failed to re-read tokens file ${this.filePath}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    let data: unknown;
+    try {
+      data = yaml.load(raw);
+    } catch (e) {
+      return singleErr('TOKENS_FILE_INVALID',
+        `tokens.yaml parse error at ${this.filePath}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    const shape = validateShape(data, this.filePath);
+    if (!shape.ok) return shape;
+
+    // Swap in-place only after validation succeeds — preserves existing state
+    // on parse failure.
+    this.records = [];
+    this.byHash.clear();
+    this.byId.clear();
+    this.registryName = shape.value.name;
+    for (const raw of shape.value.tokens) {
+      const record = normalizeRecord(raw);
+      this.records.push(record);
+      this.byHash.set(record.hash, record);
+      this.byId.set(record.id, record);
+    }
+    return ok({ total: this.records.length, active: this.activeCount() });
+  }
+
   /** Optional human label recorded at the top of tokens.yaml. */
   name(): string | undefined { return this.registryName; }
 

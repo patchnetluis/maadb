@@ -34,19 +34,35 @@ export function installReloadSignalHandler(ctx: InstanceCtx): void {
   signalHandler = () => {
     // Fire-and-forget — the signal handler itself must return synchronously.
     // Errors land on the ops log via performInstanceReload's internal logging.
-    void performInstanceReload(ctx, 'sighup').then((result) => {
-      if (!result.ok) {
-        const first = result.errors[0];
+    void (async () => {
+      const instanceResult = await performInstanceReload(ctx, 'sighup');
+      if (!instanceResult.ok) {
+        const first = instanceResult.errors[0];
         getOpsLog().warn(
-          {
-            event: 'sighup_reload_failed',
-            code: first?.code,
-            message: first?.message,
-          },
+          { event: 'sighup_reload_failed', code: first?.code, message: first?.message },
           'sighup_reload_failed',
         );
       }
-    });
+      // 0.7.0 — reload tokens.yaml too. Independent of instance reload; a
+      // failure here doesn't roll back the instance reload. Captures of
+      // ctx.tokens elsewhere (the HTTP transport closure) stay valid because
+      // TokenStore.reload mutates the existing instance in-place.
+      if (ctx.tokens !== null) {
+        const tokensResult = await ctx.tokens.reload();
+        if (!tokensResult.ok) {
+          const first = tokensResult.errors[0];
+          getOpsLog().warn(
+            { event: 'sighup_tokens_reload_failed', code: first?.code, message: first?.message },
+            'sighup_tokens_reload_failed',
+          );
+        } else {
+          getOpsLog().info(
+            { event: 'tokens_reload', total: tokensResult.value.total, active: tokensResult.value.active },
+            'tokens_reload',
+          );
+        }
+      }
+    })();
   };
   process.on('SIGHUP', signalHandler);
 }

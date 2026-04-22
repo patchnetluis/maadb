@@ -334,6 +334,74 @@ describe('TokenStore.rotate', () => {
   });
 });
 
+describe('TokenStore.reload — in-place refresh for SIGHUP', () => {
+  it('picks up new tokens added to disk without replacing the store reference', async () => {
+    const loaded = await TokenStore.load(tmpRoot);
+    if (!loaded.ok) return;
+    const store = loaded.value;
+    await store.issue({ role: 'admin', projects: [{ name: '*' }], name: 'original' });
+    expect(store.size()).toBe(1);
+
+    // Externally append a new entry (simulates maad auth issue-token run
+    // in a separate process, or an operator editing tokens.yaml directly).
+    const externalPlain = 'maad_pat_' + 'c'.repeat(32);
+    const externalHash = createHash('sha256').update(externalPlain, 'utf8').digest('hex');
+    await seedFile(`
+tokens:
+${store.list().map(r => `  - id: ${r.id}\n    hash: ${r.hash}\n    role: ${r.role}\n    projects:\n      - name: "*"\n    created_at: "${r.createdAt}"`).join('\n')}
+  - id: tok-external
+    hash: ${externalHash}
+    role: reader
+    projects:
+      - name: proj-x
+    created_at: "2026-04-21T20:00:00Z"
+`);
+
+    // Reference retained before reload
+    const reloaded = await store.reload();
+    expect(reloaded.ok).toBe(true);
+    if (!reloaded.ok) return;
+    expect(reloaded.value.total).toBe(2);
+    expect(reloaded.value.active).toBe(2);
+
+    // Same store instance — captures by upstream code see the new data.
+    expect(store.size()).toBe(2);
+    expect(store.lookupById(tokenId('tok-external'))?.role).toBe('reader');
+  });
+
+  it('leaves state untouched on parse error', async () => {
+    const loaded = await TokenStore.load(tmpRoot);
+    if (!loaded.ok) return;
+    const store = loaded.value;
+    await store.issue({ role: 'admin', projects: [{ name: '*' }] });
+    const beforeSize = store.size();
+
+    // Clobber the file with garbage
+    await seedFile('this is: [definitely: [not valid');
+    const result = await store.reload();
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors[0]?.code).toBe('TOKENS_FILE_INVALID');
+    // In-memory state unchanged
+    expect(store.size()).toBe(beforeSize);
+  });
+
+  it('empties the store when the file is deleted externally', async () => {
+    const loaded = await TokenStore.load(tmpRoot);
+    if (!loaded.ok) return;
+    const store = loaded.value;
+    await store.issue({ role: 'admin', projects: [{ name: '*' }] });
+    expect(store.size()).toBe(1);
+
+    await rm(path.join(tmpRoot, '_auth'), { recursive: true, force: true });
+    const result = await store.reload();
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.total).toBe(0);
+    expect(store.size()).toBe(0);
+  });
+});
+
 describe('TokenStore.activeCount — expiry semantics', () => {
   it('excludes expired tokens without mutating them', async () => {
     const loaded = await TokenStore.load(tmpRoot);

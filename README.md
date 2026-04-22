@@ -3,8 +3,8 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%E2%89%A522-brightgreen.svg)](package.json)
 [![TypeScript](https://img.shields.io/badge/typescript-strict-blue.svg)](tsconfig.json)
-[![Tests](https://img.shields.io/badge/tests-575%20passing-brightgreen.svg)](tests)
-[![Version](https://img.shields.io/badge/version-0.6.8-purple.svg)](Version.md)
+[![Tests](https://img.shields.io/badge/tests-640%20passing-brightgreen.svg)](tests)
+[![Version](https://img.shields.io/badge/version-0.7.0-purple.svg)](Version.md)
 
 > **Markdown is the database. The engine makes it queryable.**
 
@@ -14,7 +14,7 @@ MAADb stores records as markdown files with YAML frontmatter for structured fiel
 
 - **Markdown is canonical.** Open any record in any text editor — your data is exactly what's on screen, no translation layer.
 - **Git is the audit trail.** Every write is a commit. `maad_history` shows the full change history for any record.
-- **LLM-native.** Ships with 22+ MCP tools for discovery, read, write, and maintenance. Designed for agent workflows from the start.
+- **LLM-native.** Ships with 30+ MCP tools for discovery, read, write, maintenance, and auth. Designed for agent workflows from the start.
 - **Optional schemas.** Add YAML schemas when you want structure, skip them when you don't. Validation runs on writes, never on old records.
 - **The index is a speed layer.** SQLite stores pointers into your markdown files. Delete it and it rebuilds — your data never depends on the index surviving.
 - **Safe under concurrent writes.** Clean shutdown, lock recovery, rate limiting, retry-safe operations all built in.
@@ -109,13 +109,24 @@ The Architect skill handles type discovery, schema design, registry creation, an
 
 ## Remote / hosted deployment
 
-MAADb serves over HTTP/SSE for multi-session hosted deployments. One process handles many concurrent client sessions with bearer-token auth at the handshake, concurrent reads, polling delta ([`maad_changes_since`](docs/change-feed.md)), and an unauthenticated `/healthz` liveness probe. TLS terminated upstream at a reverse proxy.
+MAADb serves over HTTP/SSE for multi-session hosted deployments. One process handles many concurrent client sessions with per-agent token auth at the handshake, concurrent reads, polling delta ([`maad_changes_since`](docs/change-feed.md)), live push notifications, and an unauthenticated `/healthz` liveness probe. TLS terminated upstream at a reverse proxy.
+
+Generate a token from the CLI (plaintext printed ONCE; server stores only the SHA-256 hash):
 
 ```bash
-MAAD_AUTH_TOKEN=$(openssl rand -base64 48 | tr -d '=' | tr '+/' '-_') \
+node dist/cli.js --instance /path/to/instance.yaml auth issue-token \
+  --role=admin --name='primary-gateway' --projects='*' --agent=agt-gateway
+# → maad_pat_<32hex> on stdout
+```
+
+Clients present that plaintext as `Authorization: Bearer <token>` on every HTTP request. Start the server:
+
+```bash
 node dist/cli.js --instance /path/to/instance.yaml serve \
   --transport http --http-host 127.0.0.1 --http-port 7733
 ```
+
+Hot-reload tokens + instance config on edits: `sudo systemctl reload maad` (or `docker compose kill -s SIGHUP maad`). Rotate tokens via `maad auth rotate-token --id=tok-<id>`; revoke via `maad auth revoke-token --id=tok-<id>`. Full auth primitives: [`docs/specs/0.7.0-scoped-auth.md`](docs/specs/0.7.0-scoped-auth.md).
 
 Deployment guides:
 
@@ -133,7 +144,7 @@ MCP roles control what tools an agent can use. Set via `--role` at server startu
 | `writer` | reader + create, update, validate, bulk_create, bulk_update | Standard agents that read and write records |
 | `admin` | writer + delete, reindex, reload, health | Project setup, schema changes, maintenance |
 
-Under stdio (local subprocess), the agent has filesystem access anyway, so role enforcement is advisory — the trust boundary is the host machine. Under HTTP transport, the bearer token is checked at the handshake and the role attached to the project binding decides which tools are visible. Per-token role tiers are on the roadmap (0.6.0).
+Under stdio (local subprocess), the agent has filesystem access anyway, so role enforcement is advisory — the trust boundary is the host machine. Under HTTP transport (0.7.0+), the bearer token hashes into the per-agent registry at `_auth/tokens.yaml`; the token's global role × per-project cap × instance project ceiling compose via a three-cap min rule on every tool call. Token records are immutable except `revokedAt` — capability changes require `maad auth revoke-token` + `issue-token`.
 
 ## Project layout
 
@@ -165,6 +176,9 @@ All tools return `{ ok: true, data: {...} }` or `{ ok: false, errors: [...] }`. 
 **Read:** `maad_get`, `maad_query`, `maad_search`, `maad_related`, `maad_aggregate`, `maad_join`, `maad_verify`, `maad_changes_since`
 **Write:** `maad_create`, `maad_update`, `maad_bulk_create`, `maad_bulk_update`, `maad_validate`
 **Maintain:** `maad_delete`, `maad_reindex`, `maad_reload`, `maad_health`, `maad_history`, `maad_audit`
+**Live updates (0.6.11+):** `maad_subscribe`, `maad_unsubscribe` — push notifications on durable writes.
+**Instance admin:** `maad_instance_reload`, `maad_subscriptions`.
+**Auth admin (0.7.0+):** `maad_issue_token`, `maad_revoke_token`, `maad_rotate_token`, `maad_list_tokens`, `maad_show_token`.
 
 In multi-project mode, session tools are always available pre-bind: `maad_projects`, `maad_use_project`, `maad_use_projects`, `maad_current_session`.
 
@@ -177,7 +191,7 @@ In multi-project mode, session tools are always available pre-bind: `maad_projec
 
 ## Current state
 
-**Current:** v0.6.8 — gateway session pinning for trusted multi-tenant hosting. 575 tests passing.
+**Current:** v0.7.0 — Scoped auth & identity (per-agent tokens, three-cap role composition, identity-enriched audit + commits) plus a response-hygiene pass. 640 tests passing.
 
 See [Version.md](Version.md) for the full release history and [ROADMAP.md](ROADMAP.md) for the path to 1.0.
 
@@ -185,7 +199,7 @@ See [Version.md](Version.md) for the full release history and [ROADMAP.md](ROADM
 
 - TypeScript strict, Node.js 22+ (tested on v24)
 - 6 production dependencies: `better-sqlite3`, `gray-matter`, `js-yaml`, `simple-git`, `@modelcontextprotocol/sdk`, `pino`
-- 575 tests, Vitest
+- 640 tests, Vitest
 - MIT license, pre-1.0, actively developed
 
 ## License

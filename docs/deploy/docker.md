@@ -33,6 +33,17 @@ chmod 600 secrets/maad_auth_token
 
 Never put the token in `compose.yaml` or in an env file checked into git. Docker secrets mount the file at `/run/secrets/<name>` inside the container with correct permissions.
 
+**0.7.0+:** HTTP transport requires `_auth/tokens.yaml` (in the instance root) with at least one active token. Legacy single-bearer mode was hard-removed in 0.7.0 — generate tokens via `maad auth issue-token` after the container is built but before first start. Example:
+
+```bash
+# Inside the container (or from a one-shot admin container sharing the volume):
+node /opt/maad/dist/cli.js --instance /mnt/brains/instance.yaml auth issue-token \
+  --role=admin --name='primary-gateway' --projects='*' --agent=agt-gateway
+# Plaintext printed once; store it as the client's bearer.
+```
+
+Hot-reload on tokens.yaml edits: `docker compose kill -s SIGHUP maad` (SIGHUP reloads both instance.yaml and tokens.yaml in-place without restart).
+
 ## 2. Dockerfile
 
 Multi-stage build — install + build in a heavier image, copy only runtime artifacts into a minimal final stage.
