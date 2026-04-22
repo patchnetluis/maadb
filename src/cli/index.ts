@@ -11,6 +11,7 @@ import { cmdGet, cmdQuery, cmdSearch, cmdRelated, cmdSchema } from './commands/r
 import { cmdCreate, cmdUpdate } from './commands/write.js';
 import { cmdInit, cmdValidate, cmdReindex, cmdParse } from './commands/maintain.js';
 import { cmdHistory, cmdAudit } from './commands/audit.js';
+import { cmdAuth } from './commands/auth.js';
 import { startServer } from '../mcp/server.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -70,6 +71,8 @@ async function main(): Promise<void> {
     // Audit
     case 'history':   await cmdHistory(ctx); break;
     case 'audit':     await cmdAudit(ctx); break;
+    // Auth (0.7.0)
+    case 'auth':     await cmdAuth({ instancePath, args }); break;
     // MCP
     case 'serve':
       await cmdServe();
