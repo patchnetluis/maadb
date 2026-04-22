@@ -117,8 +117,8 @@ function generateFullCommandRef(cmd: string): string {
 | \`related <doc_id> outgoing\` | Documents this one references |
 | \`related <doc_id> incoming\` | Documents that reference this one |
 | \`schema <type>\` | Field definitions, ID prefix, format hints (use before writes) |
-| \`aggregate\` | Group by a field with optional metric (count/sum/avg/min/max) |
-| \`join\` | Query + follow refs + project fields from both sides in one call |
+| \`aggregate\` | Group by a field with count/sum/avg/min/max. **Use instead of iterating records to compute totals.** Supports multi-hop ref chains (\`a->b->c\`) for cross-doctype aggregates. Filters accept \`between\` shortcut and array-of-ops (AND). |
+| \`join\` | Query + follow refs + project fields from both sides in one call. **Use instead of \`query\` → \`get\` → \`get\` chains.** |
 | \`verify mode=field\` | Fact-check a field value: grounded true/false + actual value + source |
 | \`verify mode=count\` | Fact-check a document count: grounded true/false + actual count |
 | \`changes_since <cursor>\` | Delta feed — records modified since cursor. Opaque base64url cursor, stable order on (updated_at ASC, doc_id ASC). Empty cursor = from the beginning. |
@@ -191,6 +191,8 @@ function generateRules(): string {
 7. **Cite \`doc_id\` and \`block_id\`** in answers for traceability
 8. **\`reindex --force\`** recovers from any stale state
 9. **Inspect \`_meta.warnings[]\` on write responses** — the engine surfaces soft-validation signals (precision drift, deprecation hints) alongside successful writes. Agents self-correct on warnings, not just on errors
+10. **Use \`aggregate\` for group-by totals** — don't iterate records to compute counts, sums, averages, mins, or maxes. One \`aggregate\` call with \`metric\` + \`groupBy\` returns the answer; use the \`a->b->c\` ref-chain form for cross-doctype groupings.
+11. **Use \`join\` to follow refs in one call** — don't chain \`query\` → \`get\` → \`get\` to collect related fields. \`join\` projects fields from both sides of a ref in one pass.
 
 ## Grounding Rules (CRITICAL)
 

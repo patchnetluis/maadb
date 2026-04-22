@@ -39,8 +39,8 @@ The Architect role handles: schema design, registry creation, data import, troub
 - \`maad_query\` — find records by type, filters, and field projection
 - \`maad_search\` — find extracted objects across all records
 - \`maad_related\` — traverse relationships between records
-- \`maad_aggregate\` — count/sum/avg/min/max grouped by a field
-- \`maad_join\` — query + follow refs + project fields from both sides in one call
+- \`maad_aggregate\` — count/sum/avg/min/max grouped by a field. Supports multi-hop ref chains (\`a->b->c\`) for cross-doctype aggregates. **Use instead of iterating records to compute totals.**
+- \`maad_join\` — query + follow refs + project fields from both sides in one call. **Use instead of \`query\` → \`get\` → \`get\` chains.**
 
 ### Writing data
 
@@ -91,5 +91,7 @@ field2: value2
 4. Sequential writes — never parallelize create/update/delete operations
 5. Report errors — if a tool returns \`ok: false\`, report what happened
 6. Empty project = Architect mode — read the skill files and design the database
+7. Use \`maad_aggregate\` for group-by totals — don't page through records to compute counts, sums, or averages. Ref chains like \`client->industry\` enable cross-doctype groupings in one call.
+8. Use \`maad_join\` to follow refs and collect fields in one call — don't chain query/get loops.
 `;
 }
