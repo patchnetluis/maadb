@@ -69,6 +69,51 @@ Markdown files (your data)
 
 See [FRAMEWORK.md](FRAMEWORK.md) for data doctrine, tier model, and engine design principles.
 
+## Architecture
+
+Runtime layout, client to storage:
+
+```
+┌─ Client (agent) ────────────────────────────────────────┐
+│  stdio subprocess   or   HTTP/SSE client                │
+└────────────────────────┬────────────────────────────────┘
+                         │  MCP protocol
+┌────────────────────────▼────────────────────────────────┐
+│  MCP server (one process per instance)                  │
+│    • SessionRegistry  — bind state, effective roles     │
+│    • EnginePool       — one engine per bound project    │
+│    • TokenStore       — HTTP transport only (0.7.0+)    │
+└────────────────────────┬────────────────────────────────┘
+                         │
+┌────────────────────────▼────────────────────────────────┐
+│  Instance                                               │
+│    instance.yaml        — project declarations + roles  │
+│    _auth/tokens.yaml    — per-agent tokens (HTTP only)  │
+└────────────────────────┬────────────────────────────────┘
+                         │  N projects per instance
+┌────────────────────────▼────────────────────────────────┐
+│  Project (each is a directory)                          │
+│    _registry/   Type definitions                        │
+│    _schema/     Field schemas per type                  │
+│    _backend/    SQLite index (derived, gitignored)      │
+│    _import/     Drop zone for raw imports               │
+│    _skills/     Agent skill files                       │
+│    MAAD.md      Generated agent operating instructions  │
+│    <type-dirs>/ Records (paths declared in _registry/)  │
+└────────────────────────┬────────────────────────────────┘
+                         │
+┌────────────────────────▼────────────────────────────────┐
+│  Engine (per project)                                   │
+│    parse → validate → extract → index → git-commit      │
+└─────────────────────────────────────────────────────────┘
+```
+
+**One instance, many projects.** The MCP server is instance-scoped; each bound session gets routed to the engine for its active project. Projects are filesystem-isolated — nothing in project A's engine touches project B.
+
+**One engine, two interfaces.** The engine is the same whether you reach it over stdio (local subprocess, host user is the trust boundary) or HTTP/SSE (per-agent tokens, three-cap role composition).
+
+**Two sources of truth on disk.** Markdown files are canonical — open any record in a text editor and you see exactly what the engine sees. SQLite is a rebuildable pointer index; delete `_backend/` and it rebuilds from the markdown on next operation.
+
 ## Quick start
 
 ```bash
@@ -77,9 +122,9 @@ cd maadb
 npm install && npm run build
 ```
 
-Create a project directory anywhere, then wire up MCP in your agent.
+### Single-project (simplest)
 
-**Claude Code** (`.mcp.json` in the project directory):
+Wire up MCP in your agent (`.mcp.json` in the project directory):
 
 ```json
 {
@@ -106,6 +151,97 @@ Restart your agent. The agent detects an empty project and enters **Architect mo
 > *"Create a persistent memory store for this agent."*
 
 The Architect skill handles type discovery, schema design, registry creation, and deployment. From there, any agent with an MCP connection can read and write records.
+
+### Multi-project (one server, many projects)
+
+When one MCP server should serve more than one project — or when deploying over HTTP — use an **instance config**. `instance.yaml` is a deployment artifact, hand-written once by the operator and updated whenever projects are added, removed, or have their role ceilings changed. No CLI scaffolder exists yet.
+
+Write `instance.yaml`:
+
+```yaml
+name: my-instance
+projects:
+  - name: alpha
+    path: /absolute/path/to/alpha
+    role: admin                    # role ceiling for this project
+    description: Primary project
+  - name: beta
+    path: ./beta                   # relative paths resolve against this file's directory
+    role: reader
+```
+
+**Fields:**
+- `name` (required) — instance label for logs/diagnostics
+- `projects[]` (required, ≥1):
+  - `name` — slug `[a-z][a-z0-9_-]*`, unique within the instance. This is the **bind key** agents pass to `maad_use_project(s)`.
+  - `path` — absolute, or relative to the yaml file's directory.
+  - `role` — `reader | writer | admin` (default `reader`). This is the project's **role ceiling** — the server-assigned maximum. No session can exceed it.
+  - `description` — optional, surfaces in `maad_projects`.
+
+Startup validates the file and fails fast on any error.
+
+Serve:
+
+```bash
+node dist/cli.js --instance /path/to/instance.yaml serve
+```
+
+`--project` and `--instance` are mutually exclusive. `serve` with neither flag errors.
+
+**Declaring new projects:** add another entry to `projects[]` and reload the server (`SIGHUP` / `systemctl reload maad` / `docker compose kill -s SIGHUP maad`). Projects not declared in `instance.yaml` are unreachable through MCP — there is no runtime add-project path.
+
+### Session binding
+
+Before any data-tool call, a session must bind to a project via an instance-level tool (always visible pre-bind):
+
+| Tool | Effect |
+|---|---|
+| `maad_projects` | Lists declared projects — discover bind keys |
+| `maad_use_project <name> [as=<role>]` | **Single mode** — `project=` auto-defaults on every subsequent call |
+| `maad_use_projects [names...] [as=<role>]` | **Multi mode** — every subsequent call must pass `project=<name>` |
+| `maad_current_session` | Inspect bind state |
+
+**Binding is monotonic and terminal.** `maad_use_project(s)` is one-shot:
+- Second call (including re-binding to the same project) returns `SESSION_ALREADY_BOUND`.
+- You cannot escalate single → multi mid-session.
+- Rebinding requires disconnect + reconnect.
+
+Default to multi mode unless you are certain the session touches exactly one project.
+
+### How roles are assigned
+
+Roles are **server-assigned ceilings**. An agent never sets its own role — it can only accept a downgrade via `as=<role>` at bind time.
+
+- **`instance.yaml` per-project `role:`** — set by the operator. This is the absolute ceiling for the project. Cannot be exceeded by any path.
+- **`_auth/tokens.yaml` token caps** (HTTP only) — set by admin at token issuance. Per-token global role + per-project caps. Tokens are immutable; capability changes require revoke + reissue.
+- **`as=<role>` at bind time** — agent-controlled, **downgrade only**. `as=admin` when the ceiling is `reader` fails `ROLE_UPGRADE_DENIED`.
+
+**Effective role composition:**
+- stdio: `min(project ceiling, as= requested)`
+- HTTP: `min(project ceiling, token cap, as= requested)` — three-cap min rule, enforced on every tool call.
+
+### Isolation & escalation
+
+- `instance.yaml` and `_auth/tokens.yaml` are filesystem-only artifacts. No MCP tool can read or modify them.
+- Admin-tier MCP tools (`maad_issue_token`, `maad_revoke_token`, `maad_rotate_token`) require admin on **every** bound project. Reader/writer sessions cannot reach them.
+- An admin session cannot issue a token that exceeds the instance project ceiling.
+- Token records are append-only with revocation — never upgraded in place.
+- Under stdio, the host machine's filesystem permissions are the trust boundary (role enforcement is advisory). Under HTTP, the token registry is the trust boundary.
+
+### Error taxonomy
+
+| Code | When |
+|---|---|
+| `SESSION_UNBOUND` | data-tool call before any `maad_use_project(s)` |
+| `SESSION_ALREADY_BOUND` | second `maad_use_project(s)` in the same session |
+| `PROJECT_REQUIRED` | multi mode call missing `project=` |
+| `PROJECT_NOT_WHITELISTED` | multi mode `project=` outside the whitelist |
+| `PROJECT_UNKNOWN` | name not in `instance.yaml` |
+| `INSUFFICIENT_ROLE` | tool requires higher role than session's effective role |
+| `ROLE_UPGRADE_DENIED` | `as=` requests higher role than ceiling |
+| `INSTANCE_CONFIG_INVALID` | startup-only; server refuses to start |
+| `TOKEN_ROLE_ABOVE_GLOBAL` | token issuance: per-project role exceeds global |
+| `TOKEN_PROJECT_FORBIDDEN` | token presented for a project outside its allowlist |
 
 ## Remote / hosted deployment
 
@@ -136,7 +272,7 @@ Deployment guides:
 
 ## Access roles
 
-MCP roles control what tools an agent can use. Set via `--role` at server startup, or in `instance.yaml` per project.
+MCP roles control what tools an agent can use. Ceiling set per project in `instance.yaml`; assignment mechanics and three-cap composition detailed in [How roles are assigned](#how-roles-are-assigned).
 
 | Role | Tools | Use case |
 |------|-------|----------|
@@ -144,29 +280,29 @@ MCP roles control what tools an agent can use. Set via `--role` at server startu
 | `writer` | reader + create, update, validate, bulk_create, bulk_update | Standard agents that read and write records |
 | `admin` | writer + delete, reindex, reload, health | Project setup, schema changes, maintenance |
 
-Under stdio (local subprocess), the agent has filesystem access anyway, so role enforcement is advisory — the trust boundary is the host machine. Under HTTP transport (0.7.0+), the bearer token hashes into the per-agent registry at `_auth/tokens.yaml`; the token's global role × per-project cap × instance project ceiling compose via a three-cap min rule on every tool call. Token records are immutable except `revokedAt` — capability changes require `maad auth revoke-token` + `issue-token`.
-
 ## Project layout
+
+A MAADb project is a directory. `maad init <dir>` scaffolds the structure:
 
 ```
 my-project/
   _registry/                      # Type definitions (YAML)
     object_types.yaml
   _schema/                        # Field schemas per type (YAML)
-    client.v1.yaml
-  _backend/                       # Derived index — gitignored, rebuildable
+    case.v1.yaml
+  _backend/                       # SQLite index — gitignored, rebuildable
     maad.db
-  _inbox/                         # Raw files for import — drop zone
+  _import/                        # Drop zone for raw markdown imports
   _skills/                        # Agent skill files (architect, import, etc.)
-  data/                           # All records live here
-    clients/                      #   One folder per registered type
-      cli-acme.md
-    cases/
-      cas-2026-001.md
-  MAAD.md                         # Generated: agent operating instructions
+  MAAD.md                         # Generated: stable agent operating instructions
+  CLAUDE.md                       # Generated: MCP-first agent workflow guide
+  <type-dirs>/                    # Record files — one directory per type
+    cas-2026-001.md
 ```
 
-**Convention:** `_` prefix = engine-managed. `data/` = your records. Records never live at the project root.
+**Convention:** `_` prefix = engine-managed (don't hand-edit unless you know what you're doing). Every other directory holds records.
+
+**Record directories are type-declared, not hardcoded.** Each type in `_registry/object_types.yaml` declares its own `path:` — e.g. `cases/`, `clients/`, `data/cases/`, whatever you prefer. The architect skill picks a layout that fits the data shape.
 
 ## MCP tools
 
