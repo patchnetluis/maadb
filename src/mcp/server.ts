@@ -37,6 +37,7 @@ import * as writeTools from './tools/write.js';
 import * as auditTools from './tools/audit.js';
 import * as maintainTools from './tools/maintain.js';
 import * as instanceTools from './tools/instance.js';
+import * as authTools from './tools/auth.js';
 
 export type Transport = 'stdio' | 'http';
 
@@ -149,6 +150,11 @@ export async function startServer(opts: ServeOptions): Promise<void> {
       // instances — handler rejects synthetic with INSTANCE_RELOAD_SYNTHETIC
       // rather than an opaque "unknown tool" response.
       toolCount += instanceTools.registerReload(server, ctx);
+      // 0.7.0 — admin token registry tools. Handler refuses if ctx.tokens is
+      // null (stdio/synthetic mode has no registry); registering always so
+      // synthetic clients get a clear TOKENS_FILE_MISSING error rather than
+      // an opaque "unknown tool" response.
+      toolCount += authTools.register(server, ctx);
     }
     return { server, toolCount };
   };

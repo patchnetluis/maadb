@@ -22,6 +22,8 @@ const ADMIN_TOOLS = [
   'maad_delete', 'maad_reindex', 'maad_reload', 'maad_health',
   'maad_instance_reload',
   'maad_subscriptions',
+  'maad_issue_token', 'maad_revoke_token', 'maad_rotate_token',
+  'maad_list_tokens', 'maad_show_token',
 ] as const;
 
 const ROLE_TOOLS: Record<Role, readonly string[]> = {

@@ -26,9 +26,9 @@ describe('MCP roles', () => {
     expect(tools.has('maad_reindex')).toBe(false);
   });
 
-  it('admin gets 27 tools (all)', () => {
+  it('admin gets 32 tools (all)', () => {
     const tools = getToolsForRole('admin');
-    expect(tools.size).toBe(27);
+    expect(tools.size).toBe(32);
     expect(tools.has('maad_delete')).toBe(true);
     expect(tools.has('maad_reindex')).toBe(true);
     expect(tools.has('maad_reload')).toBe(true);
@@ -37,6 +37,11 @@ describe('MCP roles', () => {
     expect(tools.has('maad_subscribe')).toBe(true);
     expect(tools.has('maad_unsubscribe')).toBe(true);
     expect(tools.has('maad_subscriptions')).toBe(true);
+    expect(tools.has('maad_issue_token')).toBe(true);
+    expect(tools.has('maad_revoke_token')).toBe(true);
+    expect(tools.has('maad_rotate_token')).toBe(true);
+    expect(tools.has('maad_list_tokens')).toBe(true);
+    expect(tools.has('maad_show_token')).toBe(true);
   });
 
   it('parseRole defaults to reader for invalid input', () => {
