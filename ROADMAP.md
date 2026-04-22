@@ -96,9 +96,13 @@ Delivered in five phases (P1–P5) on branch `feat/0.6.7-schema-precision`. P1 (
 
 ---
 
-## Current: v0.7.0
+## Current: v0.7.1
 
-Scoped Auth & Identity + response hygiene. See [Version.md](Version.md) for the full entry.
+Agent-first aggregate capabilities — multi-hop ref traversal in `maad_aggregate.groupBy` (`a->b->c` syntax), range / array-of-ops filters (`between` + AND-array forms), response-safety guard (hard limit caps + projected-size check preventing silent harness truncation), and MAAD.md / CLAUDE.md trigger rules pushing agents toward `aggregate` / `join` over manual iteration. See [Version.md](Version.md) for the full entry and [`docs/specs/0.7.1-agent-first-aggregate.md`](docs/specs/0.7.1-agent-first-aggregate.md) for the design.
+
+**Scope guard (MAADB stance on aggregation):** MAADB is an agent-friendly document store with ergonomic aggregates — not an OLAP engine. If reports regularly drive schema decisions or routinely scan >50K records, the right break is a separate reporting module that consumes MAADB dumps, not bolting analytics features onto MAADB itself.
+
+v0.7.0 — Scoped Auth & Identity + response hygiene (prior release).
 
 ---
 

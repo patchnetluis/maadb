@@ -1,9 +1,18 @@
 ---
 enabled: true
-current: 0.7.0
+current: 0.7.1
 ---
 
 # Version History
+
+## 0.7.1 — 2026-04-22
+Agent-first aggregate capabilities.
+
+Multi-hop ref traversal in `maad_aggregate.groupBy` (`a->b->c` syntax, arbitrary depth; broken refs bin under `__unresolved__` so data-quality issues stay visible). Range / composite filters on `maad_query` and `maad_aggregate` — `between` shortcut + array-of-ops with AND semantics, desugared to atomic conditions at engine layer so the backend only sees the simple forms. Hard caps on `limit` (500 on query, 2000 on aggregate) with silent clamp + `_meta.limit_clamped` signal; server-side projected-size guard (64KB default, `MAAD_RESPONSE_MAX_BYTES` override) returns `RESPONSE_TOO_LARGE` with hint — closes the silent-harness-truncation bug from jrn-2026-093. MAAD.md + CLAUDE.md generators gain trigger rules pushing agents toward `aggregate` / `join` over manual record iteration.
+
+**Scope guard (enters ROADMAP verbatim):** MAADB is an agent-friendly document store with ergonomic aggregates — not an OLAP engine. If reports regularly drive schema decisions or routinely scan >50K records, the right break is a separate reporting module that consumes MAADB dumps, not bolting analytics features onto MAADB itself.
+
+R3 cursor continuation deferred to 0.7.2 per fup-2026-092 (jrn-2026-093 full diagnostic, jrn-2026-094 scope lock). Spec at `docs/specs/0.7.1-agent-first-aggregate.md`. Six new error codes: `RESPONSE_TOO_LARGE`, `CURSOR_INVALID`, `SCHEMA_REF_CHAIN_INVALID`, `FILTER_BETWEEN_INVALID`, `FILTER_EMPTY_ARRAY`, `FILTER_OP_INVALID`. 689 tests passing (+49 over 0.7.0 baseline), no new dependencies.
 
 ## 0.7.0 — 2026-04-21
 Scoped Auth & Identity + Response Hygiene.
