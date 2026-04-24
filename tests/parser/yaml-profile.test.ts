@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { validateYamlProfile, checkMultiDocument } from '../../src/parser/yaml-profile.js';
+import { validateYamlProfile } from '../../src/parser/yaml-profile.js';
 import { filePath } from '../../src/types.js';
 
 const fp = filePath('test.md');
@@ -45,17 +45,3 @@ describe('validateYamlProfile', () => {
   });
 });
 
-describe('checkMultiDocument', () => {
-  it('accepts normal frontmatter', () => {
-    const raw = '---\ndoc_id: test\n---\n\n# Heading\n\nBody.';
-    expect(checkMultiDocument(raw, fp)).toBeNull();
-  });
-
-  it('detects multi-document YAML', () => {
-    const raw = '---\ndoc_id: test\n---\n\n# Heading\n\n---\ndoc_id: second\n---';
-    const err = checkMultiDocument(raw, fp);
-    expect(err).not.toBeNull();
-    expect(err!.code).toBe('YAML_PROFILE_VIOLATION');
-    expect(err!.message).toContain('Multi-document');
-  });
-});

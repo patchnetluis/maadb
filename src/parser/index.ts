@@ -13,14 +13,14 @@ import { parseBlocks } from './blocks.js';
 import { findVerbatimZones } from './verbatim.js';
 import { extractValueCalls } from './tags.js';
 import { extractAnnotations } from './annotations.js';
-import { validateYamlProfile, checkMultiDocument } from './yaml-profile.js';
+import { validateYamlProfile } from './yaml-profile.js';
 
 export { parseFrontmatter } from './frontmatter.js';
 export { parseBlocks } from './blocks.js';
 export { findVerbatimZones, isInVerbatimZone } from './verbatim.js';
 export { extractValueCalls } from './tags.js';
 export { extractAnnotations } from './annotations.js';
-export { validateYamlProfile, checkMultiDocument } from './yaml-profile.js';
+export { validateYamlProfile } from './yaml-profile.js';
 
 export async function parseDocument(
   path: FilePath,
@@ -34,16 +34,19 @@ export async function parseDocument(
     return singleErr('FILE_READ_ERROR', `Failed to read file: ${message}`, { file: path, line: 0, col: 0 });
   }
 
-  const hash = createHash('sha256').update(raw).digest('hex');
+  return parseDocumentFromContent(raw, path, subtypeMap);
+}
 
-  // Check for multi-document YAML
-  const multiDocErr = checkMultiDocument(raw, path);
-  if (multiDocErr) return { ok: false, errors: [multiDocErr] };
+export function parseDocumentFromContent(
+  raw: string,
+  path: FilePath,
+  subtypeMap: Record<string, Primitive>,
+): Result<ParsedDocument> {
+  const hash = createHash('sha256').update(raw).digest('hex');
 
   const fm = parseFrontmatter(raw, path);
   if (!fm.ok) return fm;
 
-  // Validate YAML profile (constrained subset)
   const profileResult = validateYamlProfile(fm.value.frontmatter, path);
   if (!profileResult.ok) return profileResult as Result<ParsedDocument>;
 

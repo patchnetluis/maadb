@@ -1,9 +1,14 @@
 ---
 enabled: true
-current: 0.7.1
+current: 0.7.2
 ---
 
 # Version History
+
+## 0.7.2 — 2026-04-24
+Atomic writes on the parser path.
+
+Body `---` thematic breaks no longer rejected as multi-document YAML — the misapplied `checkMultiDocument` scan that flagged any `---` after the frontmatter fence is removed. gray-matter already scopes frontmatter to the first `---`/`---` pair; everything after is body content. Writes now pre-flight the composed markdown through the parser before `atomicWrite`, so invalid frontmatter fails cleanly with no orphan file on disk. Post-write index failures carry `docId` + `filePath` in error details so callers can clean up if one ever slips through. New export `parseDocumentFromContent(raw, path, subtypeMap)` drives the pre-flight without a disk roundtrip. 690 tests passing (+1 over 0.7.1 baseline). Closes fup-2026-091; R3 Phase B cursor continuation shifts to 0.7.3.
 
 ## 0.7.1 — 2026-04-22
 Agent-first aggregate capabilities.

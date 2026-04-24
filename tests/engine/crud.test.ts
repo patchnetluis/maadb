@@ -285,6 +285,55 @@ describe('bulkCreate', () => {
   });
 });
 
+describe('body thematic-break (fup-2026-091)', () => {
+  it('accepts --- separators in body as markdown thematic breaks, not multi-document YAML', async () => {
+    const body = 'Part A\n\n---\n\nPart B\n\n---\n\nPart C';
+    const result = await engine.createDocument(
+      docType('client'),
+      { name: 'Thematic Break Co', status: 'active' },
+      body,
+      'cli-thematic-break',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // Record is indexed (not just written to disk)
+    const get = await engine.getDocument(docId('cli-thematic-break'), 'cold');
+    expect(get.ok).toBe(true);
+    if (!get.ok) return;
+    expect(get.value.body).toContain('Part A');
+    expect(get.value.body).toContain('Part B');
+    expect(get.value.body).toContain('Part C');
+    expect(get.value.body).toContain('---');
+  });
+
+  it('accepts --- separators via updateDocument body replace', async () => {
+    const result = await engine.updateDocument(
+      docId('cli-thematic-break'),
+      undefined,
+      'Section 1\n\n---\n\nSection 2',
+    );
+    expect(result.ok).toBe(true);
+
+    const get = await engine.getDocument(docId('cli-thematic-break'), 'cold');
+    expect(get.ok).toBe(true);
+    if (!get.ok) return;
+    expect(get.value.body).toContain('Section 1');
+    expect(get.value.body).toContain('Section 2');
+  });
+
+  it('accepts --- in body via bulkCreate without orphaning files', async () => {
+    const result = await engine.bulkCreate([
+      { docType: 'client', fields: { name: 'Bulk Break A', status: 'active' }, body: 'Top\n\n---\n\nBottom' },
+      { docType: 'client', fields: { name: 'Bulk Break B', status: 'active' }, body: 'Plain body' },
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.succeeded).toHaveLength(2);
+    expect(result.value.failed).toHaveLength(0);
+  });
+});
+
 describe('bulkUpdate', () => {
   it('updates multiple records in one call', async () => {
     const result = await engine.bulkUpdate([

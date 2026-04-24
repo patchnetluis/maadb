@@ -16,6 +16,7 @@ import {
   type DocumentRecord,
 } from '../types.js';
 import { parseMatter } from '../parser/matter.js';
+import { parseDocumentFromContent } from '../parser/index.js';
 import { validateFrontmatter } from '../schema/index.js';
 import { generateDocument, extractBody } from '../writer/index.js';
 import type { EngineContext } from './context.js';
@@ -66,6 +67,16 @@ export async function createDocument(
 
   const fp = path.join(dirPath, `${id}.md`);
 
+  // Pre-flight parse: catches frontmatter / profile errors before any disk write,
+  // so invalid writes never leave orphan files on disk.
+  const preflight = parseDocumentFromContent(markdown, toFilePath(fp), ctx.registry.subtypeMap);
+  if (!preflight.ok) {
+    return err(preflight.errors.map(e => ({
+      ...e,
+      details: { ...e.details, docId: id, filePath: fp, fileWritten: false },
+    })));
+  }
+
   // Durable write: journal → atomic write → index → git → complete
   const journalId = ctx.journal.begin('create', id, fp);
 
@@ -77,7 +88,7 @@ export async function createDocument(
     ctx.journal.advance(journalId, 'file_written'); // stays at file_written
     return err(indexResult.errors.map(e => ({
       ...e,
-      details: { ...e.details, fileWritten: true, indexed: false, recoveryHint: 'Run maad reindex to recover' },
+      details: { ...e.details, docId: id, filePath: fp, fileWritten: true, indexed: false, recoveryHint: 'Run maad reindex to recover' },
     })));
   }
   ctx.journal.advance(journalId, 'indexed');
@@ -184,6 +195,16 @@ export async function updateDocument(
 
   const markdown = generateDocument(updatedFm, schema, currentBody.trim() || undefined);
 
+  // Pre-flight parse: catches frontmatter / profile errors before any disk write,
+  // so invalid updates never clobber the existing file.
+  const preflight = parseDocumentFromContent(markdown, toFilePath(absPath), ctx.registry.subtypeMap);
+  if (!preflight.ok) {
+    return err(preflight.errors.map(e => ({
+      ...e,
+      details: { ...e.details, docId: id as string, filePath: absPath, fileWritten: false },
+    })));
+  }
+
   // Durable write: journal → atomic write → index → git → complete
   const journalId = ctx.journal.begin('update', id as string, absPath);
 
@@ -194,7 +215,7 @@ export async function updateDocument(
   if (!indexResult.ok) {
     return err(indexResult.errors.map(e => ({
       ...e,
-      details: { ...e.details, fileWritten: true, indexed: false, recoveryHint: 'Run maad reindex to recover' },
+      details: { ...e.details, docId: id as string, filePath: absPath, fileWritten: true, indexed: false, recoveryHint: 'Run maad reindex to recover' },
     })));
   }
   ctx.journal.advance(journalId, 'indexed');
@@ -365,6 +386,13 @@ export async function bulkCreate(
     const dirPath = path.join(ctx.projectRoot, regType.path);
     if (!existsSync(dirPath)) mkdirSync(dirPath, { recursive: true });
     const fp = path.join(dirPath, `${id}.md`);
+
+    // Pre-flight parse: keep invalid records out of the batch before touching disk.
+    const preflight = parseDocumentFromContent(markdown, toFilePath(fp), ctx.registry.subtypeMap);
+    if (!preflight.ok) {
+      failed.push({ index: i, docId: id, error: preflight.errors.map(e => e.message).join('; ') });
+      continue;
+    }
 
     try {
       await atomicWrite(fp, markdown);

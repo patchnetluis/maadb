@@ -4,7 +4,7 @@
 // nesting, no complex keys. Runs after gray-matter parse, before schema.
 // ============================================================================
 
-import { ok, singleErr, maadError, type Result, type MaadError } from '../errors.js';
+import { ok, maadError, type Result, type MaadError } from '../errors.js';
 import type { FilePath } from '../types.js';
 
 const MAX_DEPTH = 2;
@@ -95,33 +95,3 @@ function validateValue(
   return errors;
 }
 
-/**
- * Detect multi-document YAML. gray-matter only parses the first document,
- * but we should warn if the raw content contains multiple --- separators
- * that suggest multi-document YAML.
- */
-export function checkMultiDocument(raw: string, filePath: FilePath): MaadError | null {
-  // Count --- lines (excluding the frontmatter delimiters)
-  const lines = raw.split('\n');
-  let separatorCount = 0;
-  let inFrontmatter = false;
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (trimmed === '---') {
-      if (!inFrontmatter) {
-        inFrontmatter = true;
-      } else if (inFrontmatter && separatorCount === 0) {
-        separatorCount++; // closing delimiter — this is normal
-        inFrontmatter = false;
-      } else {
-        // Additional --- after frontmatter is closed — multi-document indicator
-        return maadError('YAML_PROFILE_VIOLATION',
-          'Multi-document YAML detected (additional --- separator). MAAD supports single-document YAML only.',
-          { file: filePath, line: lines.indexOf(line) + 1, col: 1 });
-      }
-    }
-  }
-
-  return null;
-}
