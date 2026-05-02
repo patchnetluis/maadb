@@ -100,7 +100,7 @@ async function cmdServe(): Promise<void> {
   let role: string | undefined = process.env['MAAD_ROLE'];
   let dryRun = false;
   let provenance: string | undefined = process.env['MAAD_PROV'];
-  let transport: 'stdio' | 'http' = (process.env['MAAD_TRANSPORT'] as 'stdio' | 'http' | undefined) ?? 'stdio';
+  let transport: 'stdio' | 'http' | 'unix' = (process.env['MAAD_TRANSPORT'] as 'stdio' | 'http' | 'unix' | undefined) ?? 'stdio';
   let httpHost: string = process.env['MAAD_HTTP_HOST'] ?? '127.0.0.1';
   let httpPort: number = parseIntEnv(process.env['MAAD_HTTP_PORT'], 7733);
   let httpMaxBody: number = parseIntEnv(process.env['MAAD_HTTP_MAX_BODY'], 1_048_576);
@@ -110,6 +110,14 @@ async function cmdServe(): Promise<void> {
   let idleMs: number = parseIntEnv(process.env['MAAD_SESSION_IDLE_MS'], 1_800_000);
   let trustProxy: boolean = process.env['MAAD_TRUST_PROXY'] === '1' || process.env['MAAD_TRUST_PROXY'] === 'true';
   let authToken: string | undefined = process.env['MAAD_AUTH_TOKEN'];
+  // 0.7.5 (fup-2026-148) — Unix-socket transport
+  let socketPath: string | undefined = process.env['MAAD_UNIX_SOCKET'];
+  let socketMode: number | undefined = (() => {
+    const raw = process.env['MAAD_UNIX_SOCKET_MODE'];
+    if (!raw) return undefined;
+    const n = Number.parseInt(raw, 8);
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  })();
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -117,7 +125,7 @@ async function cmdServe(): Promise<void> {
     if (a === '--role' && next) role = next;
     else if (a === '--dry-run') dryRun = true;
     else if (a === '--prov' && next) provenance = next;
-    else if (a === '--transport' && next) transport = next as 'stdio' | 'http';
+    else if (a === '--transport' && next) transport = next as 'stdio' | 'http' | 'unix';
     else if (a === '--http-host' && next) httpHost = next;
     else if (a === '--http-port' && next) httpPort = parseIntEnv(next, httpPort);
     else if (a === '--http-max-body' && next) httpMaxBody = parseIntEnv(next, httpMaxBody);
@@ -127,10 +135,20 @@ async function cmdServe(): Promise<void> {
     else if (a === '--session-idle-ms' && next) idleMs = parseIntEnv(next, idleMs);
     else if (a === '--trust-proxy') trustProxy = true;
     else if (a === '--auth-token' && next) authToken = next;
+    else if (a === '--unix-socket' && next) socketPath = next;
+    else if (a === '--unix-socket-mode' && next) {
+      const n = Number.parseInt(next, 8);
+      if (Number.isFinite(n) && n > 0) socketMode = n;
+    }
   }
 
-  if (transport !== 'stdio' && transport !== 'http') {
-    console.error(`Error: --transport must be 'stdio' or 'http' (got '${transport}')`);
+  if (transport !== 'stdio' && transport !== 'http' && transport !== 'unix') {
+    console.error(`Error: --transport must be 'stdio', 'http', or 'unix' (got '${transport}')`);
+    process.exit(1);
+  }
+
+  if (transport === 'unix' && (!socketPath || socketPath.length === 0)) {
+    console.error("Error: --transport unix requires --unix-socket=<path> or MAAD_UNIX_SOCKET env");
     process.exit(1);
   }
 
@@ -142,7 +160,7 @@ async function cmdServe(): Promise<void> {
     dryRun,
     provenance,
     transport,
-    ...(transport === 'http' ? {
+    ...(transport === 'http' || transport === 'unix' ? {
       http: {
         host: httpHost,
         port: httpPort,
@@ -153,6 +171,7 @@ async function cmdServe(): Promise<void> {
         trustProxy,
         idleMs,
         authToken,
+        ...(transport === 'unix' ? { socketPath, socketMode } : {}),
       },
     } : {}),
   } as const;
@@ -199,27 +218,31 @@ Options:
   --force                           Force full reindex (skip hash check)
   --help                            Show this help
 
-serve HTTP options (when --transport http):
-  --transport <stdio|http>          Transport selection (default: stdio)
-  --http-host <host>                Bind address (default: 127.0.0.1)
-  --http-port <port>                Bind port (default: 7733)
-  --auth-token <token>              Bearer token (required for http; prefer MAAD_AUTH_TOKEN env)
+serve HTTP options (when --transport http or --transport unix):
+  --transport <stdio|http|unix>     Transport selection (default: stdio)
+  --http-host <host>                Bind address for http (default: 127.0.0.1)
+  --http-port <port>                Bind port for http (default: 7733)
+  --unix-socket <path>              Unix socket path (required for unix transport)
+  --unix-socket-mode <octal>        Socket file mode (default: 660)
+  --auth-token <token>              Bearer token (required for http/unix; prefer MAAD_AUTH_TOKEN env)
   --http-max-body <bytes>           Max request body bytes (default: 1048576)
   --http-headers-timeout <ms>       node:http headersTimeout (default: 10000)
   --http-request-timeout <ms>       node:http requestTimeout (default: 60000)
   --http-keepalive-timeout <ms>     node:http keepAliveTimeout (default: 5000)
   --session-idle-ms <ms>            Per-session idle eviction threshold (default: 1800000 = 30 min)
-  --trust-proxy                     Use X-Forwarded-For first hop for remote IP in logs
+  --trust-proxy                     Use X-Forwarded-For first hop for remote IP in logs (http only)
 
 Environment Variables:
   MAAD_PROJECT                      Project root (fallback for --project)
   MAAD_INSTANCE                     Path to instance.yaml (fallback for --instance)
   MAAD_ROLE                         Server role (fallback for --role)
   MAAD_PROV                         Provenance mode (fallback for --prov)
-  MAAD_TRANSPORT                    stdio | http (default: stdio)
+  MAAD_TRANSPORT                    stdio | http | unix (default: stdio)
   MAAD_HTTP_HOST                    HTTP bind host (default: 127.0.0.1)
   MAAD_HTTP_PORT                    HTTP bind port (default: 7733)
-  MAAD_AUTH_TOKEN                   Bearer token for HTTP transport (required for http)
+  MAAD_UNIX_SOCKET                  Unix socket path (required when MAAD_TRANSPORT=unix)
+  MAAD_UNIX_SOCKET_MODE             Socket file mode in octal (default: 660)
+  MAAD_AUTH_TOKEN                   Bearer token for HTTP/UDS transport (required)
   MAAD_SESSION_IDLE_MS              Per-session idle eviction threshold (default: 1800000)
   MAAD_HTTP_MAX_BODY                HTTP max body bytes (default: 1048576)
   MAAD_HTTP_HEADERS_TIMEOUT_MS      headersTimeout ms (default: 10000)

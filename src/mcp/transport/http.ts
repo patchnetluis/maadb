@@ -9,6 +9,7 @@
 // ============================================================================
 
 import { createServer as createHttpServer, type Server as HttpServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { existsSync, unlinkSync, chmodSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -27,6 +28,18 @@ import { registerNotifier, unregisterNotifier, type ChangeEvent } from '../notif
 export interface HttpTransportOptions {
   host: string;
   port: number;
+  /**
+   * 0.7.5 (fup-2026-148) — When set, the server binds to this Unix domain
+   * socket path instead of host:port. Same MCP protocol over a different
+   * socket, so all auth/session/SSE plumbing is reused unchanged. Intended
+   * deployment: trusted-app-process colocated with the engine, socket file
+   * mode gates access at the filesystem layer (defense-in-depth on top of
+   * the bearer auth that's still required). `host`/`port`/`trustProxy` are
+   * ignored when this is set.
+   */
+  socketPath?: string | undefined;
+  /** Octal file mode applied to the socket after bind. Default 0o660. */
+  socketMode?: number | undefined;
   maxBodyBytes: number;
   headersTimeoutMs: number;
   requestTimeoutMs: number;
@@ -328,15 +341,42 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
   httpServer.requestTimeout = opts.requestTimeoutMs;
   httpServer.keepAliveTimeout = opts.keepAliveTimeoutMs;
 
-  await new Promise<void>((resolve, reject) => {
-    httpServer.once('error', reject);
-    httpServer.listen(opts.port, opts.host, () => {
-      httpServer.off('error', reject);
-      resolve();
+  // 0.7.5 (fup-2026-148) — bind to Unix socket when configured; otherwise TCP.
+  // Stale-socket cleanup before listen() handles the common case where a
+  // crashed prior process left the socket file behind. Socket mode (default
+  // 0o660) chmod-applied after listen so transient world-readable race is
+  // bounded by listen-then-chmod (well under any real attacker window for
+  // the trusted-host deploy this targets).
+  if (opts.socketPath) {
+    try {
+      if (existsSync(opts.socketPath)) unlinkSync(opts.socketPath);
+    } catch (e) {
+      throw new Error(`failed to remove stale Unix socket at ${opts.socketPath}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    await new Promise<void>((resolve, reject) => {
+      httpServer.once('error', reject);
+      httpServer.listen(opts.socketPath, () => {
+        httpServer.off('error', reject);
+        const mode = opts.socketMode ?? 0o660;
+        try { chmodSync(opts.socketPath!, mode); } catch (e) {
+          logger.bestEffort('mcp', 'http.unix.chmod',
+            `chmod ${mode.toString(8)} on ${opts.socketPath} failed`,
+            { error: e instanceof Error ? e.message : String(e) });
+        }
+        resolve();
+      });
     });
-  });
-
-  logger.info('mcp', 'http', `Server started on http://${opts.host}:${opts.port}/mcp`);
+    logger.info('mcp', 'http', `Server started on unix:${opts.socketPath}/mcp (mode ${(opts.socketMode ?? 0o660).toString(8)})`);
+  } else {
+    await new Promise<void>((resolve, reject) => {
+      httpServer.once('error', reject);
+      httpServer.listen(opts.port, opts.host, () => {
+        httpServer.off('error', reject);
+        resolve();
+      });
+    });
+    logger.info('mcp', 'http', `Server started on http://${opts.host}:${opts.port}/mcp`);
+  }
 
   // Idle sweeper — walks the entries map every ~60s and evicts transports
   // whose lastActivityAt is past the idle threshold. Unref'd so the interval
@@ -376,6 +416,13 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
         opts.sessions.destroy(sid, 'shutdown');
       }
       entries.clear();
+      // 0.7.5 — UDS cleanup. Best-effort: if a fast SIGKILL beat us here,
+      // the next startup's stale-socket unlink will catch it.
+      if (opts.socketPath) {
+        try {
+          if (existsSync(opts.socketPath)) unlinkSync(opts.socketPath);
+        } catch { /* best-effort */ }
+      }
     },
   };
 }

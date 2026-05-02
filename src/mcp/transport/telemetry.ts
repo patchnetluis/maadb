@@ -10,12 +10,14 @@
 import type { BindingSource, SessionCloseReason } from '../../instance/session.js';
 import { getAuditLog, getOpsLog } from '../../logging.js';
 
-export type TransportKind = 'stdio' | 'http';
+export type TransportKind = 'stdio' | 'http' | 'unix';
 
 export interface TransportInfo {
   kind: TransportKind;
   host?: string | undefined;
   port?: number | undefined;
+  /** 0.7.5 (fup-2026-148) — unix transport socket path. */
+  socketPath?: string | undefined;
   startedAt: string;
 }
 
@@ -43,6 +45,7 @@ export interface TransportSnapshot {
     kind: TransportKind;
     host?: string | undefined;
     port?: number | undefined;
+    socketPath?: string | undefined;
     uptimeSeconds: number;
   };
   sessions: SessionsBlock;
@@ -61,6 +64,7 @@ export function initTransportTelemetry(info: {
   kind: TransportKind;
   host?: string | undefined;
   port?: number | undefined;
+  socketPath?: string | undefined;
 }): void {
   const now = Date.now();
   state = {
@@ -68,6 +72,7 @@ export function initTransportTelemetry(info: {
       kind: info.kind,
       host: info.host,
       port: info.port,
+      socketPath: info.socketPath,
       startedAt: new Date(now).toISOString(),
     },
     startedAtMs: now,
@@ -158,7 +163,9 @@ export function getTransportSnapshot(activeSessions: number, pinnedSessions = 0)
   const transport: TransportSnapshot['transport'] =
     kind === 'http'
       ? { kind, host: s.info.host, port: s.info.port, uptimeSeconds }
-      : { kind, uptimeSeconds };
+      : kind === 'unix'
+        ? { kind, socketPath: s.info.socketPath, uptimeSeconds }
+        : { kind, uptimeSeconds };
   // Stdio is a single implicit session — cap reported active at 1 regardless
   // of registry state so the contract in the spec holds. Pinned is always 0
   // on stdio (header plumbing is HTTP-only).

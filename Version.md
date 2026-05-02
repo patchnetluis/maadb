@@ -1,9 +1,24 @@
 ---
 enabled: true
-current: 0.7.4
+current: 0.7.5
 ---
 
 # Version History
+
+## 0.7.5 — 2026-05-01
+Unix domain socket transport (fup-2026-148).
+
+New `MAAD_TRANSPORT=unix` (or `--transport unix`) binds the same MCP/HTTP server to a Unix domain socket instead of TCP. Same SDK transport, same auth path, same session/SSE plumbing — only the socket binding differs. Intended for trusted-host colocated deployments (Patchnet Projects MVP Phase C, brain-app multi-tenant) where the engine must never open a TCP port and access is gated at the filesystem layer. Bearer auth via `_auth/tokens.yaml` is still required as defense in depth.
+
+`startHttpTransport` gains optional `socketPath` and `socketMode` (default `0o660`) options. When `socketPath` is set, the server unlinks any stale socket file from a prior crashed run before bind, calls `httpServer.listen(socketPath)`, and chmods the socket to the configured mode. On `close()` the socket file is unlinked best-effort. `host` / `port` / `trustProxy` are accepted but ignored when `socketPath` is set — the caller routes via `transport='unix'` from the server boot path.
+
+CLI gains `--unix-socket <path>` and `--unix-socket-mode <octal>` (default `660`). Env: `MAAD_UNIX_SOCKET`, `MAAD_UNIX_SOCKET_MODE`. Boot validation rejects `--transport unix` without a socket path or with synthetic instance mode (single-project legacy paths remain stdio-only).
+
+`maad_health.transport.kind` gains `'unix'` plus a `socketPath` field so operators can confirm the bind without grepping logs. Telemetry's `TransportKind` union now `stdio | http | unix`. `idle_sweep`, `session_open`, `session_close` events are unchanged — the transport-agnostic SessionRegistry already handles them.
+
+Tests: `tests/mcp/http-unix-socket.test.ts` covers bind / stale-socket cleanup / `/healthz` / `/mcp initialize` / shutdown unlink. Skipped on Windows because Node's `AF_UNIX` requires admin/elevated permissions on `%TEMP%` paths (deployment target is Linux). 739 tests passing (+0 over 0.7.4 baseline; 5 new UDS tests skipped on this host, run on Linux CI/deploy).
+
+No breaking changes — all additions are additive. Existing HTTP and stdio deployments are unaffected.
 
 ## 0.7.4 — 2026-05-01
 Reindex auto-detects schema-index changes (fup-2026-093).
@@ -165,7 +180,7 @@ Initial engine build. Parser, registry, schema, extractor (11 primitives), SQLit
 
 Phase plan locked in `dec-maadb-070-optimization-track` (2026-04-21). Releases through 0.8.0 form an agent-first optimization track; 0.8.5+ unchanged from prior roadmap.
 
-- **0.7.5** — Agent-First Engine. `maad_status` cross-project rollup, followup `supersedes` schema field, canonical `_skills/session-protocol.md` in engine. Plus remaining composites that collapse common call chains: `maad_bulk_update_where`, `maad_context(docId)`, `maad_get_many`, `maad_related depth: 'hydrated'`, `maad_subscribe_from(cursor)`. (`maad_query depth: 'cold'|'full'` shipped early in 0.7.3.)
+- **0.7.7** — Agent-First Engine (renumbered from 0.7.5 after Unix-socket transport landed there). `maad_status` cross-project rollup, followup `supersedes` schema field, canonical `_skills/session-protocol.md` in engine. Plus remaining composites that collapse common call chains: `maad_bulk_update_where`, `maad_context(docId)`, `maad_get_many`, `maad_related depth: 'hydrated'`, `maad_subscribe_from(cursor)`. (`maad_query depth: 'cold'|'full'` shipped early in 0.7.3.)
 - **0.7.6** — Cleanup Wave 1. Safe mass-cleanup primitives — all destructive tools default to dry-run with `confirm: true` required: `maad_bulk_delete`, `maad_delete_where`, `maad_repair_where`, `maad_find_orphans`, `maad_purge_soft_deleted`.
 - **0.8.0** — Operational Hygiene + Imports. `maad_prune_sessions` (stale-session sweeper), `maad_compact` (`VACUUM` + `git gc`), `maad_reindex_selective`, `maad_find_duplicates` + original Import workflow: `_inbox/` convention, source tracking, duplicate detection, readonly type flag.
 - **0.8.5** — Remote MCP hardening: per-connection role tiers, rate-limit policy, backpressure thresholds, mutex timeout, stress suite, metrics export, `git gc` automation.

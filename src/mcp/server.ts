@@ -39,7 +39,7 @@ import * as maintainTools from './tools/maintain.js';
 import * as instanceTools from './tools/instance.js';
 import * as authTools from './tools/auth.js';
 
-export type Transport = 'stdio' | 'http';
+export type Transport = 'stdio' | 'http' | 'unix';
 
 export interface HttpServeOptions {
   host: string;
@@ -51,6 +51,15 @@ export interface HttpServeOptions {
   trustProxy: boolean;
   idleMs: number;
   authToken?: string | undefined;
+  /**
+   * 0.7.5 (fup-2026-148) — Unix domain socket path. When set with
+   * transport='unix' (or 'http' with this populated), the server binds
+   * to this socket instead of host:port. Same MCP protocol; trusted-host
+   * deploy pattern.
+   */
+  socketPath?: string | undefined;
+  /** Socket file mode (octal). Default 0o660. */
+  socketMode?: number | undefined;
 }
 
 export interface ServeOptions {
@@ -174,9 +183,13 @@ export async function startServer(opts: ServeOptions): Promise<void> {
 
   const transportKind: Transport = opts.transport ?? 'stdio';
 
-  if (transportKind === 'http') {
+  if (transportKind === 'http' || transportKind === 'unix') {
     if (!opts.http) {
-      console.error('MAAD MCP: --transport http requires HTTP config');
+      console.error(`MAAD MCP: --transport ${transportKind} requires HTTP/UDS config`);
+      process.exit(1);
+    }
+    if (transportKind === 'unix' && !opts.http.socketPath) {
+      console.error('MAAD MCP: --transport unix requires --unix-socket=<path> (or MAAD_UNIX_SOCKET env)');
       process.exit(1);
     }
 
@@ -184,8 +197,10 @@ export async function startServer(opts: ServeOptions): Promise<void> {
     // requires _auth/tokens.yaml with ≥1 active entry. Stale MAAD_AUTH_TOKEN
     // env config surfaces a distinctive LEGACY_BEARER_REMOVED error so
     // operators see the migration hint before chasing a generic boot failure.
+    // 0.7.5 — UDS transport reuses the same auth gate; bearer is still required
+    // (filesystem perms are defense-in-depth, not a replacement).
     if (instance.source !== 'file' || !instance.configPath) {
-      console.error('MAAD MCP: --transport http requires --instance (synthetic --project mode is stdio-only in 0.7.0)');
+      console.error(`MAAD MCP: --transport ${transportKind} requires --instance (synthetic --project mode is stdio-only)`);
       process.exit(1);
     }
     const instanceRoot = path.dirname(instance.configPath);
@@ -198,10 +213,17 @@ export async function startServer(opts: ServeOptions): Promise<void> {
     // One-time registration log using a throwaway count from a probe server.
     // In HTTP mode the real server instances are built per session.
     const { toolCount } = buildMcpServer();
+    const transportLabel = transportKind === 'unix'
+      ? `unix:${opts.http.socketPath}`
+      : `http://${opts.http.host}:${opts.http.port}`;
     logger.info('mcp', 'startup',
-      `${toolCount} tools registered — instance "${instance.name}" (${instance.source}), ${instance.projects.length} project(s)${dryRun ? ' (dry-run)' : ''} [transport=http]`);
+      `${toolCount} tools registered — instance "${instance.name}" (${instance.source}), ${instance.projects.length} project(s)${dryRun ? ' (dry-run)' : ''} [transport=${transportKind}, ${transportLabel}]`);
 
-    initTransportTelemetry({ kind: 'http', host: opts.http.host, port: opts.http.port });
+    initTransportTelemetry(
+      transportKind === 'unix'
+        ? { kind: 'unix', socketPath: opts.http.socketPath! }
+        : { kind: 'http', host: opts.http.host, port: opts.http.port },
+    );
 
     // Wire session-close fan-out: when a session is destroyed (for any
     // reason — client DELETE, transport drop, idle sweep, shutdown), release
@@ -215,6 +237,8 @@ export async function startServer(opts: ServeOptions): Promise<void> {
     const handle: HttpTransportHandle = await startHttpTransport({
       host: opts.http.host,
       port: opts.http.port,
+      socketPath: transportKind === 'unix' ? opts.http.socketPath : undefined,
+      socketMode: transportKind === 'unix' ? opts.http.socketMode : undefined,
       maxBodyBytes: opts.http.maxBodyBytes,
       headersTimeoutMs: opts.http.headersTimeoutMs,
       requestTimeoutMs: opts.http.requestTimeoutMs,
