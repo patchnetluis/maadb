@@ -1,9 +1,22 @@
 ---
 enabled: true
-current: 0.7.7
+current: 0.7.8
 ---
 
 # Version History
+
+## 0.7.8 — 2026-05-02
+Repository hygiene + dependency tightening + Node 24 baseline.
+
+Cleanup pass with no engine code changes. Caret specifiers tightened to exact pins on runtime infrastructure (`@modelcontextprotocol/sdk`, `better-sqlite3`, `pino`, `simple-git`) and tilde on utility libraries and dev dependencies — currently-installed versions preserved, no forced downgrades, future minor releases now deliberate rather than implicit on `npm install`.
+
+`engines.node` raised from `>=22` to `>=24` (current Active LTS as of October 2025); `@types/node` aligned to 24.x to match. No Node 24-only APIs added — existing code runs unchanged on Node 22 with an `engine-strict` warning on install. The bump signals the maintained baseline, not a runtime requirement.
+
+`.github/dependabot.yml` added: weekly schedule, grouped `@types/*` and dev dependencies, major bumps held for manual review. Combined with the policy of not merging fresh releases within ~7 days unless security-tagged, the repo now has a defended supply-chain posture.
+
+Documentation cleanup: `ROADMAP.md` deleted (Version.md §Planned has been canonical since 0.7.0; the file had drifted into pre-0.7 slot numbers contradicting actual ship history). `RELEASE-CHECKLIST.md` removed from the public repo. `FRAMEWORK.md` relocated to `docs/framework.md` to keep the repo root tight. `LICENSE` copyright corrected. `README.md` refreshed to the current version, current shipped scope, and Node 24 baseline. Shipped 0.7.0 and 0.7.1 specs rotated from `docs/specs/` to `docs/archive/`.
+
+817 tests passing — same as 0.7.7. No new dependencies. No breaking changes.
 
 ## 0.7.7 — 2026-05-01
 Schema-cache coherence across concurrent writers (fup-2026-202).

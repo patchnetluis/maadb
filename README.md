@@ -1,10 +1,10 @@
 # MAADb — Markdown As A Database
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Node.js](https://img.shields.io/badge/node-%E2%89%A522-brightgreen.svg)](package.json)
+[![Node.js](https://img.shields.io/badge/node-%E2%89%A524-brightgreen.svg)](package.json)
 [![TypeScript](https://img.shields.io/badge/typescript-strict-blue.svg)](tsconfig.json)
-[![Tests](https://img.shields.io/badge/tests-689%20passing-brightgreen.svg)](tests)
-[![Version](https://img.shields.io/badge/version-0.7.1-purple.svg)](Version.md)
+[![Tests](https://img.shields.io/badge/tests-817%20passing-brightgreen.svg)](tests)
+[![Version](https://img.shields.io/badge/version-0.7.8-purple.svg)](Version.md)
 
 > **Markdown is the database. The engine makes it queryable.**
 
@@ -67,7 +67,7 @@ Markdown files (your data)
   -> MCP server (LLM agent interface)
 ```
 
-See [FRAMEWORK.md](FRAMEWORK.md) for data doctrine, tier model, and engine design principles.
+See [docs/framework.md](docs/framework.md) for data doctrine, tier model, and engine design principles.
 
 ## Architecture
 
@@ -327,15 +327,23 @@ In multi-project mode, session tools are always available pre-bind: `maad_projec
 
 ## Current state
 
-**Current:** v0.7.1 — Agent-first aggregate capabilities: multi-hop ref traversal in `groupBy` (`a->b->c`), range / array-of-ops filters, response-safety guard against harness truncation, plus agent-instruction trigger rules for `aggregate` / `join`. 689 tests passing.
+**Current:** v0.7.8 — Repository hygiene + dependency tightening + Node 24 baseline. No engine code changes.
 
-See [Version.md](Version.md) for the full release history and [ROADMAP.md](ROADMAP.md) for the path to 1.0.
+Recent shipped scope:
+- **0.7.7** — Schema-cache coherence across concurrent writers (silent index-corruption fix)
+- **0.7.6** — Parser / write-path security hardening (`INVALID_DOC_ID` validator + path-containment guards)
+- **0.7.5** — Unix domain socket transport (`MAAD_TRANSPORT=unix`)
+- **0.7.4** — Reindex auto-detects schema-index changes (no more `--force` after schema flips)
+- **0.7.3** — Engine hardening + agent-first composites (YAML coercion guard, bulk caps, commit identity)
+- **0.7.0–0.7.1** — Scoped auth & identity, agent-first aggregate capabilities
+
+See [Version.md](Version.md) for the full release history and forward plan.
 
 ## Stack
 
-- TypeScript strict, Node.js 22+ (tested on v24)
+- TypeScript strict, Node.js 24+ (current Active LTS)
 - 6 production dependencies: `better-sqlite3`, `gray-matter`, `js-yaml`, `simple-git`, `@modelcontextprotocol/sdk`, `pino`
-- 689 tests, Vitest
+- 817 tests, Vitest
 - MIT license, pre-1.0, actively developed
 
 ## License
