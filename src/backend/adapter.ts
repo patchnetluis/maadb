@@ -69,6 +69,10 @@ export interface MaadBackend {
   getStats(): BackendStats;
   countBrokenRefs(): number;
 
+  // Engine meta key/value (0.7.4 — schema-index fingerprints, future expansion)
+  getMeta(key: string): string | null;
+  setMeta(key: string, value: string): void;
+
   // Batch write (wraps all puts in a transaction for a single document)
   materializeDocument(
     doc: DocumentRecord,

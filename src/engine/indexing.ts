@@ -13,12 +13,14 @@ import {
   docType as toDocType,
   filePath as toFilePath,
   type DocId,
+  type DocType,
   type FilePath,
   type ParsedDocument,
   type BoundDocument,
   type ValidatedField,
   type ExtractionResult,
   type DocumentRecord,
+  type SchemaDefinition,
 } from '../types.js';
 import { parseDocument } from '../parser/index.js';
 import { validateFrontmatter } from '../schema/index.js';
@@ -27,14 +29,54 @@ import type { EngineContext } from './context.js';
 import type { IndexResult } from './types.js';
 import { collectMarkdownFiles, computeNumericValue } from './helpers.js';
 
+// 0.7.4 (fup-2026-093) — Per-type schema fingerprint covering the indexed
+// field set. When a schema edit flips a field's `index: false → true` (or
+// adds/removes an indexed field), the fingerprint changes; indexAll detects
+// that and force-rebuilds docs of the affected type even when their file
+// hashes are unchanged. Closes the silent "indexed: 0, skipped: N" footgun.
+//
+// Fingerprint covers: indexed field names + their types (so a type-change
+// on an indexed field also triggers rebuild). Sorted+joined+hashed; first
+// 16 hex chars are plenty of collision resistance for this use.
+function computeIndexedFieldFingerprint(schema: SchemaDefinition): string {
+  const parts: string[] = [];
+  for (const [name, def] of schema.fields) {
+    if (def.index) parts.push(`${name}:${def.type}`);
+  }
+  parts.sort();
+  return createHash('sha256').update(parts.join('|')).digest('hex').slice(0, 16);
+}
+
+const SCHEMA_FP_KEY_PREFIX = 'schema_index_fp:';
+
 export async function indexAll(ctx: EngineContext, opts?: { force?: boolean }): Promise<IndexResult> {
   const force = opts?.force ?? false;
   const result: IndexResult = { scanned: 0, indexed: 0, skipped: 0, errors: [] };
 
+  // 0.7.4 — Detect schema-index changes per type. Types whose fingerprint
+  // changed (or was never recorded) join `dirtyTypes`, which overrides the
+  // file-hash skip path below so docs of those types reindex even if their
+  // markdown is byte-for-byte unchanged.
+  const dirtyTypes = new Set<string>();
+  const currentFingerprints = new Map<DocType, string>();
+  for (const [typeName] of ctx.registry.types) {
+    const schema = ctx.schemaStore.getSchemaForType(typeName);
+    if (!schema) continue;
+    const fp = computeIndexedFieldFingerprint(schema);
+    currentFingerprints.set(typeName, fp);
+    if (force) {
+      dirtyTypes.add(typeName as string);
+      continue;
+    }
+    const stored = ctx.backend.getMeta(`${SCHEMA_FP_KEY_PREFIX}${typeName as string}`);
+    if (stored !== fp) dirtyTypes.add(typeName as string);
+  }
+
   const storedHashes = force ? new Map() : ctx.backend.getAllFileHashes();
   const filesOnDisk = new Set<string>();
 
-  for (const [, regType] of ctx.registry.types) {
+  for (const [typeName, regType] of ctx.registry.types) {
+    const isTypeDirty = dirtyTypes.has(typeName as string);
     const dirPath = path.join(ctx.projectRoot, regType.path);
     if (!existsSync(dirPath)) continue;
 
@@ -46,7 +88,9 @@ export async function indexAll(ctx: EngineContext, opts?: { force?: boolean }): 
       const absPath = toFilePath(file);
       filesOnDisk.add(fp as string);
 
-      if (!force) {
+      // Skip-by-hash only applies when neither --force nor a schema-fingerprint
+      // change is in play. Otherwise we rebuild even if disk content matches.
+      if (!force && !isTypeDirty) {
         const raw = await readFile(file, 'utf-8');
         const currentHash = createHash('sha256').update(raw).digest('hex');
         const storedHash = storedHashes.get(fp);
@@ -74,6 +118,17 @@ export async function indexAll(ctx: EngineContext, opts?: { force?: boolean }): 
         ctx.backend.removeDocument(doc.docId);
       }
     }
+  }
+
+  // 0.7.4 — Persist current fingerprints AFTER successful rebuild so a
+  // crash mid-reindex leaves the prior fingerprint in place; next run sees
+  // the diff again and retries.
+  for (const [typeName, fp] of currentFingerprints) {
+    ctx.backend.setMeta(`${SCHEMA_FP_KEY_PREFIX}${typeName as string}`, fp);
+  }
+
+  if (dirtyTypes.size > 0) {
+    result.rebuiltTypes = [...dirtyTypes].sort();
   }
 
   return result;

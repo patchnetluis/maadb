@@ -41,9 +41,9 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
   }));
 
   server.registerTool('maad_reindex', {
-    description: 'Rebuilds the SQLite index from markdown files. Use after external file changes or to recover from stale state.',
+    description: 'Rebuilds the SQLite index from markdown files. Use after external file changes or to recover from stale state. Auto-detects per-type schema-index changes and rebuilds affected types even when files are byte-identical (rebuiltTypes lists them in the response).',
     inputSchema: z.object({
-      force: z.boolean().optional().default(false).describe('Force full rebuild (skip hash check)'),
+      force: z.boolean().optional().default(false).describe('Force full rebuild (skip both hash check and the schema-fingerprint shortcut). Rarely needed since 0.7.4 — the engine now auto-rebuilds types whose indexed-field set changed.'),
       project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
   }, async (args, extra) => withEngine(ctx, extra, 'maad_reindex', args, async ({ engine }) => {

@@ -18,6 +18,13 @@ export interface IndexResult {
   indexed: number;
   skipped: number;
   errors: import('../errors.js').MaadError[];
+  /**
+   * 0.7.4 (fup-2026-093) — types whose indexed-field set changed since the
+   * previous indexAll. Docs of these types are force-rebuilt regardless of
+   * file-hash skip; the names surface here so operators can see why a
+   * "no change on disk" reindex still did work. Empty when nothing changed.
+   */
+  rebuiltTypes?: string[];
 }
 
 /**

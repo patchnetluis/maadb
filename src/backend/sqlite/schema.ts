@@ -76,4 +76,13 @@ CREATE TABLE IF NOT EXISTS field_index (
 CREATE INDEX IF NOT EXISTS idx_field_doc ON field_index(doc_id);
 CREATE INDEX IF NOT EXISTS idx_field_name_value ON field_index(field_name, field_value);
 CREATE INDEX IF NOT EXISTS idx_field_name_numeric ON field_index(field_name, numeric_value);
+
+-- Engine meta key/value store (0.7.4, fup-2026-093). Holds per-type schema
+-- index fingerprints so indexAll can detect "indexed-field set changed since
+-- last run" and force-rebuild affected types regardless of file-hash skip.
+-- Keys are namespaced (e.g. schema_index_fp:<doc_type>).
+CREATE TABLE IF NOT EXISTS engine_meta (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 `;

@@ -1,9 +1,22 @@
 ---
 enabled: true
-current: 0.7.3
+current: 0.7.4
 ---
 
 # Version History
+
+## 0.7.4 — 2026-05-01
+Reindex auto-detects schema-index changes (fup-2026-093).
+
+Pre-0.7.4, `maad_reindex` decided whether to reindex a document by comparing the file's content hash to the stored hash. After a schema edit that flipped a field to `index: true` (or added a new indexed field), existing markdown was unchanged on disk, so reindex reported `{scanned: N, indexed: 0, skipped: N, errors: []}` and the new index stayed empty. Looked like a successful no-op. The only workaround was to touch every affected doc with a real field write — undocumented and easy to miss.
+
+Fix: the engine now tracks a per-type fingerprint of the indexed-field set (sorted `name:type` pairs hashed) in a new `engine_meta` SQLite table. Each `indexAll` run computes the current fingerprint per type, compares against the stored value, and force-rebuilds docs of any type whose fingerprint changed — regardless of file-hash skip. Fingerprints persist after successful rebuild, so a crash mid-reindex leaves the prior fingerprint in place and the next run retries cleanly.
+
+`IndexResult` gains an optional `rebuiltTypes: string[]` field so operators can see which types triggered a forced rebuild. Empty/absent when nothing changed; populated when schema edits or `--force` was in play. The `--force` flag remains as the explicit escape hatch but is rarely needed since 0.7.4 — the engine handles the common schema-edit case automatically.
+
+Backend gains `getMeta(key)` / `setMeta(key, value)` for the namespaced engine-meta surface (currently only `schema_index_fp:<doc_type>`; future expansion possible). New `engine_meta(key, value)` SQLite table created idempotently via `IF NOT EXISTS` so existing databases pick it up on first 0.7.4 boot. No migration required.
+
+739 tests passing (+5 over 0.7.3 baseline of 734). Closes the workaround used for fup-2026-201 (brain `followup.tags` index flip) — the next schema-index change in any project should just work without a `--force` reindex.
 
 ## 0.7.3 — 2026-05-01
 Engine hardening + agent-first composites. Five followups bundled.

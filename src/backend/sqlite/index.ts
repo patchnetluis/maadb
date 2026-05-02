@@ -548,6 +548,19 @@ export class SqliteBackend implements MaadBackend {
     return map;
   }
 
+  // 0.7.4 (fup-2026-093) — engine_meta key/value access. Used by indexAll for
+  // per-type schema-index fingerprints; namespace keys with `<topic>:<id>`.
+  getMeta(key: string): string | null {
+    const row = this.db.prepare('SELECT value FROM engine_meta WHERE key = ?').get(key) as { value: string } | undefined;
+    return row?.value ?? null;
+  }
+
+  setMeta(key: string, value: string): void {
+    this.db.prepare(
+      'INSERT INTO engine_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+    ).run(key, value);
+  }
+
   getStats(): BackendStats {
     const docCount = this.db.prepare('SELECT COUNT(*) as cnt FROM documents WHERE deleted = 0').get() as { cnt: number };
     const objCount = this.db.prepare('SELECT COUNT(*) as cnt FROM objects').get() as { cnt: number };
