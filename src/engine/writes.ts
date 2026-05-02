@@ -27,6 +27,8 @@ import type { ValidationWarning } from '../types.js';
 import { indexFile } from './indexing.js';
 import { generateDocId, readFrontmatter } from './helpers.js';
 import { atomicWrite } from './journal.js';
+import { checkDocIdSafe } from './docid-safe.js';
+import { isContainedIn } from './pathguard.js';
 
 export async function createDocument(
   ctx: EngineContext,
@@ -43,6 +45,19 @@ export async function createDocument(
 
   const existingIds = ctx.backend.getSampleDocIds(dt, 10000).map(id => id as string);
   const id = customDocId ?? generateDocId(regType.idPrefix, fields, existingIds);
+
+  // 0.7.6 (fup-2026-200) — reject hostile docIds at the boundary. Only
+  // customDocId can carry attacker-controlled content; auto-generated IDs are
+  // path-safe by construction. Defense-in-depth assertContainedIn fires below
+  // before the actual write, so a future bug here can't escape the project.
+  const idRejection = checkDocIdSafe(id);
+  if (idRejection) {
+    return singleErr('INVALID_DOC_ID',
+      `docId "${id}" rejected: ${idRejection.message}`,
+      undefined,
+      { reason: idRejection.reason },
+    );
+  }
 
   if (ctx.backend.getDocument(toDocId(id))) {
     return singleErr('DUPLICATE_DOC_ID', `Document "${id}" already exists`);
@@ -66,6 +81,15 @@ export async function createDocument(
   if (!existsSync(dirPath)) mkdirSync(dirPath, { recursive: true });
 
   const fp = path.join(dirPath, `${id}.md`);
+
+  // 0.7.6 (fup-2026-200) — defense-in-depth: assert the resolved write path
+  // is contained within the project root. checkDocIdSafe above should have
+  // already rejected any traversal attempt; this catches future regressions
+  // (e.g., a new code path that bypasses validation) before disk touches.
+  if (!isContainedIn(fp, ctx.projectRoot)) {
+    return singleErr('PATH_OUTSIDE_PROJECT',
+      `resolved write path "${fp}" is outside project root "${ctx.projectRoot}"`);
+  }
 
   // Pre-flight parse: catches frontmatter / profile errors before any disk write,
   // so invalid writes never leave orphan files on disk.
@@ -363,6 +387,13 @@ export async function bulkCreate(
     ];
     const id = rec.docId ?? generateDocId(regType.idPrefix, rec.fields, existingIds);
 
+    // 0.7.6 (fup-2026-200) — same boundary check as createDocument.
+    const idRejection = checkDocIdSafe(id);
+    if (idRejection) {
+      failed.push({ index: i, docId: id, error: `INVALID_DOC_ID: ${idRejection.message}` });
+      continue;
+    }
+
     if (ctx.backend.getDocument(toDocId(id))) {
       failed.push({ index: i, docId: id, error: `Document "${id}" already exists` });
       continue;
@@ -386,6 +417,12 @@ export async function bulkCreate(
     const dirPath = path.join(ctx.projectRoot, regType.path);
     if (!existsSync(dirPath)) mkdirSync(dirPath, { recursive: true });
     const fp = path.join(dirPath, `${id}.md`);
+
+    // 0.7.6 — defense-in-depth path containment.
+    if (!isContainedIn(fp, ctx.projectRoot)) {
+      failed.push({ index: i, docId: id, error: `PATH_OUTSIDE_PROJECT: resolved write path "${fp}" is outside project root` });
+      continue;
+    }
 
     // Pre-flight parse: keep invalid records out of the batch before touching disk.
     const preflight = parseDocumentFromContent(markdown, toFilePath(fp), ctx.registry.subtypeMap);

@@ -1,9 +1,26 @@
 ---
 enabled: true
-current: 0.7.5
+current: 0.7.6
 ---
 
 # Version History
+
+## 0.7.6 — 2026-05-01
+Parser / write-path security hardening (fup-2026-200).
+
+Pre-0.7.6, custom doc IDs flowed from the MCP boundary directly into `path.join(dirPath, "${id}.md")` with no validation. A hostile docId of `../../etc/maliciousfile` resolved outside the project root before any pathguard fired — `assertContainedIn` was wired into the registry loader and `maad_scan` but never the write path. Real exploit, no exotic conditions required.
+
+New `src/engine/docid-safe.ts` exports `checkDocIdSafe(id) → DocIdRejection | null` enforcing a narrow profile: `[a-zA-Z0-9._-]+` within [1, 128] characters, no leading `.`, no `..` substring, no Windows reserved device names (`CON`, `PRN`, `AUX`, `NUL`, `COM0-9`, `LPT0-9`), no control characters. The validator runs at every write-path boundary — `createDocument` and per-record in `bulkCreate` — and rejects with `INVALID_DOC_ID` plus a structured `reason` code. Auto-generated doc IDs from `generateDocId` are path-safe by construction so the validator never trips on them.
+
+Defense-in-depth: `pathguard.isContainedIn(fp, projectRoot)` now fires immediately before every `atomicWrite`, returning `PATH_OUTSIDE_PROJECT` if the resolved path escapes the project root. Even if a future code path bypasses `checkDocIdSafe`, the write physically cannot land outside the project.
+
+Tests cover the full hostile-input matrix: 49 docId profile cases (path traversal via `../`, `/`, `\`, absolute paths; control chars including NUL/newline/tab/CR; Windows reserved names; unicode/emoji/shell metachars; over-length; empty; trailing/leading dot/dash) plus end-to-end probes through `createDocument`, `bulkCreate`, and `reindex`. Bulk batches with mixed safe/hostile records reject hostile per-record without aborting the batch and leave no on-disk artifacts. A reindex over a hand-placed file with broken YAML surfaces in `errors[]` without crashing or corrupting the index. HTML/script content in body and quoted/backslash content in frontmatter strings round-trip verbatim — engine does not render or transform.
+
+Acceptance from the followup met: (1) engine rejects unsafe doc IDs/paths consistently with structured errors, (2) malformed records return structured errors without leaving on-disk artifacts or corrupting the index, (3) request-level size limits already enforced via MCP rate-limit (1 MiB body cap), (4) extraction/indexing failures contained — single bad record does not abort the indexAll run, (5) test fixtures cover create / bulk / reindex flows.
+
+811 tests passing (+72 over 0.7.5 baseline). New error code: none — reuses existing `INVALID_DOC_ID` and `PATH_OUTSIDE_PROJECT`. No new dependencies. No breaking changes — auto-generated doc IDs are unchanged, only newly-supplied custom IDs land in the validator.
+
+Granular per-field body/frontmatter size caps are follow-on if a concrete need surfaces; the existing 1 MiB request cap bounds the worst case today.
 
 ## 0.7.5 — 2026-05-01
 Unix domain socket transport (fup-2026-148).
@@ -181,7 +198,7 @@ Initial engine build. Parser, registry, schema, extractor (11 primitives), SQLit
 Phase plan locked in `dec-maadb-070-optimization-track` (2026-04-21). Releases through 0.8.0 form an agent-first optimization track; 0.8.5+ unchanged from prior roadmap.
 
 - **0.7.7** — Agent-First Engine (renumbered from 0.7.5 after Unix-socket transport landed there). `maad_status` cross-project rollup, followup `supersedes` schema field, canonical `_skills/session-protocol.md` in engine. Plus remaining composites that collapse common call chains: `maad_bulk_update_where`, `maad_context(docId)`, `maad_get_many`, `maad_related depth: 'hydrated'`, `maad_subscribe_from(cursor)`. (`maad_query depth: 'cold'|'full'` shipped early in 0.7.3.)
-- **0.7.6** — Cleanup Wave 1. Safe mass-cleanup primitives — all destructive tools default to dry-run with `confirm: true` required: `maad_bulk_delete`, `maad_delete_where`, `maad_repair_where`, `maad_find_orphans`, `maad_purge_soft_deleted`.
+- **0.7.8** — Cleanup Wave 1 (renumbered from 0.7.6 after security hardening landed there). Safe mass-cleanup primitives — all destructive tools default to dry-run with `confirm: true` required: `maad_bulk_delete`, `maad_delete_where`, `maad_repair_where`, `maad_find_orphans`, `maad_purge_soft_deleted`.
 - **0.8.0** — Operational Hygiene + Imports. `maad_prune_sessions` (stale-session sweeper), `maad_compact` (`VACUUM` + `git gc`), `maad_reindex_selective`, `maad_find_duplicates` + original Import workflow: `_inbox/` convention, source tracking, duplicate detection, readonly type flag.
 - **0.8.5** — Remote MCP hardening: per-connection role tiers, rate-limit policy, backpressure thresholds, mutex timeout, stress suite, metrics export, `git gc` automation.
 - **0.9.0** — Eviction Stage 2 + query power: LRU + hard pool cap (Stage 1 idle-timeout shipped in 0.7.3), in-place project mutations (lifts `INSTANCE_MUTATION_UNSUPPORTED`), FTS5, fuzzy entity matching, compound filters (AND/OR), cursor-based pagination.
