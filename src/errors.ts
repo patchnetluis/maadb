@@ -72,7 +72,9 @@ export type ErrorCode =
   | 'SCHEMA_REF_CHAIN_INVALID'
   | 'FILTER_BETWEEN_INVALID'
   | 'FILTER_EMPTY_ARRAY'
-  | 'FILTER_OP_INVALID';
+  | 'FILTER_OP_INVALID'
+  // 0.7.3 — engine-side flood-control safety floor (fup-2026-190)
+  | 'BULK_LIMIT_EXCEEDED';
 
 export interface MaadError {
   code: ErrorCode;

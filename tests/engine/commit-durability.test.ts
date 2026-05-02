@@ -24,20 +24,28 @@ import { autoCommit } from '../../src/git/commit.js';
 import type { CommitOutcome } from '../../src/git/commit.js';
 import { docId as toDocId, docType as toDocType } from '../../src/types.js';
 
-// Minimal SimpleGit shape that autoCommit touches.
+// Minimal SimpleGit shape that autoCommit touches. 0.7.3 added .env() chaining
+// before .commit() per fup-2026-095 — stub returns itself so the chain works
+// transparently (env config is a no-op on this fake).
 interface StubGit {
   add: (files: string[]) => Promise<void>;
   status: () => Promise<{ staged: string[]; files: unknown[] }>;
   commit: (msg: string) => Promise<{ commit: string | null }>;
+  env: (k: string, v: string) => StubGit;
 }
 
 function stubGit(overrides: Partial<StubGit>): StubGit {
-  return {
+  const base: StubGit = {
     add: async () => {},
     status: async () => ({ staged: ['one.md'], files: [] }),
     commit: async () => ({ commit: 'deadbeef' }),
+    env: (_k: string, _v: string) => base,
     ...overrides,
-  };
+  } as StubGit;
+  // Keep .env chainable to the merged base after spread (so overrides for
+  // .commit etc. apply when the caller chains through .env).
+  base.env = (_k: string, _v: string) => base;
+  return base;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

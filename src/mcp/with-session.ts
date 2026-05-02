@@ -176,10 +176,16 @@ export async function withEngine(
     }));
   }
 
+  let acquiredProject: string | null = null;
   try {
     // Resolve engine
     const poolResult = await ctx.pool.get(projectName);
     if (!poolResult.ok) return finalize(errorResponse(poolResult.errors));
+
+    // 0.7.3 — refcount the engine for the duration of this handler so the
+    // idle sweeper cannot evict mid-call. Released in finally below.
+    ctx.pool.acquire(projectName);
+    acquiredProject = projectName;
 
     const project = ctx.instance.projects.find((p) => p.name === projectName)!;
 
@@ -283,6 +289,9 @@ export async function withEngine(
     return finalize(response);
   } finally {
     slot.release();
+    // 0.7.3 — release engine refcount. Paired with acquiredProject above;
+    // null when pool.get failed and acquire was never called.
+    if (acquiredProject !== null) ctx.pool.release(acquiredProject);
   }
 }
 

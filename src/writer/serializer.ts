@@ -3,7 +3,23 @@
 // Serializes frontmatter to YAML with deterministic field ordering.
 // ============================================================================
 
+import yaml from 'js-yaml';
 import type { SchemaDefinition } from '../types.js';
+
+// Coercion-roundtrip guard. Any string whose unquoted YAML form would parse
+// back as a non-string under our CORE_SCHEMA loader must be quoted, or string
+// fields silently corrupt on read. The static keyword/numeric checks below
+// catch the common cases; this guard is the catch-all that future-proofs us
+// against any implicit-tag scalar we forgot to enumerate (leading-zero ints,
+// sci-notation lookalikes like `1e38892`, hex/octal literals, etc.).
+function wouldCoerceFromString(candidate: string): boolean {
+  try {
+    const parsed = yaml.load(candidate, { schema: yaml.CORE_SCHEMA });
+    return parsed !== candidate;
+  } catch {
+    return true;
+  }
+}
 
 export function serializeFrontmatter(
   frontmatter: Record<string, unknown>,
@@ -90,7 +106,8 @@ export function serializeField(key: string, value: unknown): string {
     str === '' ||
     str === 'true' || str === 'false' ||
     str === 'null' || str === 'yes' || str === 'no' ||
-    /^\d/.test(str) && /[^\d.eE+-]/.test(str) // looks numeric but isn't
+    /^\d/.test(str) && /[^\d.eE+-]/.test(str) || // looks numeric but isn't
+    wouldCoerceFromString(str) // catch-all: any implicit-tag coercion forces quotes
   ) {
     return `${key}: "${str.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
   }

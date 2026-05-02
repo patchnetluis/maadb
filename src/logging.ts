@@ -232,6 +232,24 @@ export function logInstanceReloadProgress(fields: InstanceReloadProgressFields):
   }
 }
 
+// ---- Ops channel readiness self-check (0.7.3, fup-2026-096) ----------------
+// One info line emitted at engine init so deploy validation can confirm the
+// ops channel is wired correctly. If this line is invisible in `journalctl
+// -u maadb` (or wherever the operator routes opsLog), no other ops event will
+// be visible either — including the load-bearing `commit_failed`. Operators
+// grep for `ops_channel_ready` once during deploy smoke-tests; never relevant
+// at runtime.
+
+export interface OpsChannelReadyFields {
+  destination: 'stderr' | 'pretty' | 'custom';
+  level: string;
+  pid: number;
+}
+
+export function logOpsChannelReady(fields: OpsChannelReadyFields): void {
+  opsLog.info(fields, 'ops_channel_ready');
+}
+
 // ---- Commit failure event (ops) -------------------------------------------
 // 0.6.10 — emitted when a git commit attached to a write fails (stage
 // succeeded but commit threw / returned no sha / status threw). Before this

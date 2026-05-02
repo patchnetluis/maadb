@@ -16,6 +16,44 @@ import type { DocId, DocType, CommitSha } from '../types.js';
 import { commitSha } from '../types.js';
 
 /**
+ * 0.7.3 (fup-2026-095) — Per-invocation git identity. The engine should never
+ * depend on the host user's `git config user.name/user.email` — when the host
+ * lacks identity, every autoCommit silently fails with "Author identity
+ * unknown" and the working tree drifts (observed 2026-04-23 on the brain-app
+ * droplet: 21 staged-uncommitted files, gitClean=false stuck).
+ *
+ * Set GIT_AUTHOR_* / GIT_COMMITTER_* env vars per-invocation so simple-git
+ * passes them to the spawned git process. These take precedence over
+ * `git config` and don't require touching repo state. Defaults are stable
+ * synthetic values; override per-deployment with MAAD_COMMIT_AUTHOR_NAME /
+ * MAAD_COMMIT_AUTHOR_EMAIL.
+ */
+const DEFAULT_COMMIT_AUTHOR_NAME = 'maadb-engine';
+const DEFAULT_COMMIT_AUTHOR_EMAIL = 'engine@maadb.local';
+
+interface GitCommitIdentityEnv {
+  GIT_AUTHOR_NAME: string;
+  GIT_AUTHOR_EMAIL: string;
+  GIT_COMMITTER_NAME: string;
+  GIT_COMMITTER_EMAIL: string;
+}
+
+export function resolveCommitAuthor(env: NodeJS.ProcessEnv = process.env): GitCommitIdentityEnv {
+  const name = env.MAAD_COMMIT_AUTHOR_NAME && env.MAAD_COMMIT_AUTHOR_NAME.length > 0
+    ? env.MAAD_COMMIT_AUTHOR_NAME
+    : DEFAULT_COMMIT_AUTHOR_NAME;
+  const email = env.MAAD_COMMIT_AUTHOR_EMAIL && env.MAAD_COMMIT_AUTHOR_EMAIL.length > 0
+    ? env.MAAD_COMMIT_AUTHOR_EMAIL
+    : DEFAULT_COMMIT_AUTHOR_EMAIL;
+  return {
+    GIT_AUTHOR_NAME: name,
+    GIT_AUTHOR_EMAIL: email,
+    GIT_COMMITTER_NAME: name,
+    GIT_COMMITTER_EMAIL: email,
+  };
+}
+
+/**
  * 0.7.0 — Identity snapshot for commit-message enrichment. Populated from
  * the session's token when `MAAD_COMMIT_IDENTITY` is on (default true in
  * 0.7.0 per dec-maadb-071 since fup-066 resolved). Set to false in the
@@ -131,7 +169,16 @@ export async function autoCommit(
     const message = formatCommitMessage(opts);
     let result;
     try {
-      result = await git.commit(message);
+      // 0.7.3 (fup-2026-095) — set identity env per-call so we never depend
+      // on the host's `git config user.name/user.email`. simple-git's .env()
+      // is chainable and applies to the next spawned git process.
+      const identity = resolveCommitAuthor();
+      result = await git
+        .env('GIT_AUTHOR_NAME', identity.GIT_AUTHOR_NAME)
+        .env('GIT_AUTHOR_EMAIL', identity.GIT_AUTHOR_EMAIL)
+        .env('GIT_COMMITTER_NAME', identity.GIT_COMMITTER_NAME)
+        .env('GIT_COMMITTER_EMAIL', identity.GIT_COMMITTER_EMAIL)
+        .commit(message);
     } catch (e) {
       // The add succeeded but the commit itself failed — worst case, since
       // the working tree is now dirty with staged but uncommitted changes.

@@ -1,9 +1,26 @@
 ---
 enabled: true
-current: 0.7.2
+current: 0.7.3
 ---
 
 # Version History
+
+## 0.7.3 — 2026-05-01
+Engine hardening + agent-first composites. Five followups bundled.
+
+**fup-2026-199 — YAML coercion-roundtrip guard.** New `wouldCoerceFromString` guard in `writer/serializer.ts` parses every candidate string scalar back through the `js-yaml` `CORE_SCHEMA` loader and forces quotes if it doesn't roundtrip as a string. Closes the implicit-tag class the static keyword/digit-prefix checks missed: all-digit (`4962218` → !!int), scientific-notation lookalike (`1e38892` → !!float Infinity), leading-zero (`007` → 7), keyword-shaped (`true`/`null`). Pairs with the 0.6.7 Phase-2 datetime-preservation fix to complete string-fidelity end-to-end. New `tests/engine/string-preservation.test.ts` (T18-T21, 6 cases) plus +6 in `tests/writer/serializer.test.ts`.
+
+**fup-2026-190[1] — Bulk-tool 50-item cap.** New `src/mcp/bulk-cap.ts` extracted as a pure-function guard so per-tool wiring stays a one-line check. `maad_bulk_create` and `maad_bulk_update` reject requests over the cap with new `BULK_LIMIT_EXCEEDED` error code carrying `{tool, received, limit, suggestedChunkSize}` and a chunking hint in the message. Default 50, configurable via `MAAD_BULK_MAX_ITEMS`, hard-clamped to [1, 1000] so a misconfigured operator can't disable the floor. Independent of per-session write-rate limits — those throttle frequency, this caps per-request blast radius and bounds memory cost of bulk-result payloads. 9 new tests.
+
+**fup-2026-095 — autoCommit identity env per-invocation.** `resolveCommitAuthor` exported from `src/git/commit.ts`. `autoCommit` and `initRepo` chain `git.env('GIT_AUTHOR_NAME'/'EMAIL'/'GIT_COMMITTER_NAME'/'EMAIL', ...)` before every spawned git process — these env vars take precedence over `git config` and don't require touching repo state. Defaults `maadb-engine` / `engine@maadb.local`; override via `MAAD_COMMIT_AUTHOR_NAME` / `MAAD_COMMIT_AUTHOR_EMAIL`. Removes the host-config fragility that left brain-app's working tree stuck with 21 staged-uncommitted files when the system user had no `user.name`/`user.email` configured. 4 new tests.
+
+**fup-2026-096 — opsLog readiness self-check.** New `logOpsChannelReady` ops event called from `mcp/server.ts` immediately after `initLogging`. Deploy validation can grep `ops_channel_ready` to confirm the channel is wired before any tool call — if this line is missing in `journalctl`, no other ops event (`commit_failed`, `rate_limited`, `validation_warning`) will surface either. +1 logging test.
+
+**fup-2026-079[a] — `maad_query depth: cold | full`.** New `src/mcp/query-depth.ts` with `hydrateQueryRows` helper. Handler accepts `depth: 'hot' | 'cold' | 'full'` (default `hot` = pre-0.7.3 behavior) plus `depthMaxResults` (default 50, hard cap 100). `cold` attaches `body` per row; `full` attaches resolved composite (refs + objects + related). Per-row failures stamp `_hydrationError` and don't abort the batch — partial results surface to the caller. `_meta.depth` carries `{depth, hydrated, capped?}`. Collapses the query-then-N-gets agent pattern that was the most-cited Tier-3 friction signal. 7 new tests.
+
+**fup-2026-150 — EnginePool idle-timeout eviction (Stage 1).** Pulled forward from 0.9.0 to bound multi-tenant memory growth. `EnginePool` gains `lastTouchedAt` per loaded engine, `acquire`/`release` refcount, background `evictIdle` sweep, `startIdleSweeper` / `stopIdleSweeper` lifecycle, `EvictionStats` snapshot, static `readIdleSweepEnv`. `MAAD_PROJECT_IDLE_TIMEOUT_MS` default 1800000 (30 min), `0` disables; `MAAD_PROJECT_SWEEP_INTERVAL_MS` default 60000 (60 s). `withSession` acquires/releases the refcount around handler execution so the sweeper never evicts a project with in-flight ops; sweep timer is `unref()`'d so process exit stays clean. Sweeper started from `mcp/server.ts`. Stage 2 (LRU + hard cap) gated on Stage 1 evidence. 10 new tests.
+
+734 tests passing (+44 over 0.7.2 baseline of 690), tsc clean. New error code: `BULK_LIMIT_EXCEEDED`. New env vars: `MAAD_BULK_MAX_ITEMS`, `MAAD_COMMIT_AUTHOR_NAME`, `MAAD_COMMIT_AUTHOR_EMAIL`, `MAAD_PROJECT_IDLE_TIMEOUT_MS`, `MAAD_PROJECT_SWEEP_INTERVAL_MS`. No new dependencies. No breaking changes — all additions are additive (depth/depthMaxResults default to existing behavior; bulk cap is a defense floor; idle timeout is opt-out via env=0).
 
 ## 0.7.2 — 2026-04-24
 Atomic writes on the parser path.
@@ -135,10 +152,10 @@ Initial engine build. Parser, registry, schema, extractor (11 primitives), SQLit
 
 Phase plan locked in `dec-maadb-070-optimization-track` (2026-04-21). Releases through 0.8.0 form an agent-first optimization track; 0.8.5+ unchanged from prior roadmap.
 
-- **0.7.5** — Agent-First Engine. `maad_status` cross-project rollup, followup `supersedes` schema field, canonical `_skills/session-protocol.md` in engine. Plus composites that collapse common call chains: `maad_query depth: 'cold'|'full'`, `maad_bulk_update_where`, `maad_context(docId)`, `maad_get_many`, `maad_related depth: 'hydrated'`, `maad_subscribe_from(cursor)`.
+- **0.7.5** — Agent-First Engine. `maad_status` cross-project rollup, followup `supersedes` schema field, canonical `_skills/session-protocol.md` in engine. Plus remaining composites that collapse common call chains: `maad_bulk_update_where`, `maad_context(docId)`, `maad_get_many`, `maad_related depth: 'hydrated'`, `maad_subscribe_from(cursor)`. (`maad_query depth: 'cold'|'full'` shipped early in 0.7.3.)
 - **0.7.6** — Cleanup Wave 1. Safe mass-cleanup primitives — all destructive tools default to dry-run with `confirm: true` required: `maad_bulk_delete`, `maad_delete_where`, `maad_repair_where`, `maad_find_orphans`, `maad_purge_soft_deleted`.
 - **0.8.0** — Operational Hygiene + Imports. `maad_prune_sessions` (stale-session sweeper), `maad_compact` (`VACUUM` + `git gc`), `maad_reindex_selective`, `maad_find_duplicates` + original Import workflow: `_inbox/` convention, source tracking, duplicate detection, readonly type flag.
 - **0.8.5** — Remote MCP hardening: per-connection role tiers, rate-limit policy, backpressure thresholds, mutex timeout, stress suite, metrics export, `git gc` automation.
-- **0.9.0** — Eviction policy + query power: in-place project mutations (lifts `INSTANCE_MUTATION_UNSUPPORTED`), FTS5, fuzzy entity matching, compound filters (AND/OR), cursor-based pagination.
+- **0.9.0** — Eviction Stage 2 + query power: LRU + hard pool cap (Stage 1 idle-timeout shipped in 0.7.3), in-place project mutations (lifts `INSTANCE_MUTATION_UNSUPPORTED`), FTS5, fuzzy entity matching, compound filters (AND/OR), cursor-based pagination.
 - **0.9.5** — Object attributes: user-defined tags on extracted objects, stored as YAML, indexed on reindex.
 - **1.0.0** — Stable release: API locked, npm published, full test coverage, migration guide.

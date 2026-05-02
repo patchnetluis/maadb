@@ -4,6 +4,7 @@ import {
   initLogging,
   logToolCall,
   logWriteAudit,
+  logOpsChannelReady,
   getOpsLog,
   getAuditLog,
 } from '../../src/logging.js';
@@ -223,6 +224,21 @@ describe('logging', () => {
     // Audit line carries channel tag, ops line does not
     expect(audit.lines[0]!.channel).toBe('audit');
     expect(ops.lines[0]!.channel).toBeUndefined();
+  });
+
+  // ---- L9 — ops_channel_ready self-check (0.7.3, fup-2026-096) -------------
+
+  it('L9 — logOpsChannelReady emits one ops line with destination/level/pid', () => {
+    logOpsChannelReady({ destination: 'stderr', level: 'info', pid: 12345 });
+
+    expect(ops.lines.length).toBe(1);
+    const line = ops.lines[0]!;
+    expect(line.msg).toBe('ops_channel_ready');
+    expect(line.destination).toBe('stderr');
+    expect(line.level).toBe('info');
+    expect(line.pid).toBe(12345);
+    // Audit channel does not receive the readiness line
+    expect(audit.lines.length).toBe(0);
   });
 
   // ---- L8 — getAuditLog is live after init ---------------------------------

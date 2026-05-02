@@ -16,7 +16,7 @@ import type {
   DiffResult,
   SnapshotResult,
 } from '../types.js';
-import { autoCommit, type CommitOptions, type CommitOutcome } from './commit.js';
+import { autoCommit, resolveCommitAuthor, type CommitOptions, type CommitOutcome } from './commit.js';
 import { getHistory, getAudit } from './log.js';
 import { getDiff } from './diff.js';
 import { getSnapshot } from './snapshot.js';
@@ -74,9 +74,17 @@ export class GitLayer {
       writeFileSync(gitignorePath, '_backend/\n', 'utf-8');
     }
 
-    // Initial commit
+    // Initial commit. Identity env per fup-2026-095 — same fragility as
+    // autoCommit: a host without `git config user.name/email` would otherwise
+    // fail this initial commit too.
     await this.git.add('.gitignore');
-    await this.git.commit('maad:init — Initialize MAAD project');
+    const identity = resolveCommitAuthor();
+    await this.git
+      .env('GIT_AUTHOR_NAME', identity.GIT_AUTHOR_NAME)
+      .env('GIT_AUTHOR_EMAIL', identity.GIT_AUTHOR_EMAIL)
+      .env('GIT_COMMITTER_NAME', identity.GIT_COMMITTER_NAME)
+      .env('GIT_COMMITTER_EMAIL', identity.GIT_COMMITTER_EMAIL)
+      .commit('maad:init — Initialize MAAD project');
   }
 
   async commit(opts: CommitOptions): Promise<CommitOutcome> {

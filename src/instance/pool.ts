@@ -33,6 +33,31 @@ export interface InstanceReloadStats {
   projectsRemoved: number;
 }
 
+/**
+ * 0.7.3 (fup-2026-150) — Idle-timeout eviction Stage 1.
+ *
+ * Tracks last-touched-at + in-flight refcount per loaded engine. A background
+ * sweeper closes engines that have been idle longer than the configured
+ * timeout AND have zero in-flight ops. Caps memory growth in multi-tenant
+ * deployments where projects are touched once and never again.
+ *
+ * Stage 2 (LRU + hard cap) is fup-2026-151 — gated on Stage 1 evidence.
+ */
+export interface EvictionStats {
+  evictionsTotal: number;
+  lastEvictionAt: Date | null;
+  lastEvictionProjects: string[];
+  sweepsRun: number;
+  lastSweepAt: Date | null;
+}
+
+export interface IdleSweepConfig {
+  /** Idle timeout threshold in ms. 0 disables eviction (just tracks touch times). */
+  idleTimeoutMs: number;
+  /** Sweep interval in ms. */
+  sweepIntervalMs: number;
+}
+
 export class EnginePool {
   private engines = new Map<string, MaadEngine>();
   private initPromises = new Map<string, Promise<Result<MaadEngine>>>();
@@ -46,7 +71,28 @@ export class EnginePool {
     projectsRemoved: 0,
   };
 
+  // 0.7.3 — Idle-timeout eviction state. lastTouchedAt is bumped on every
+  // successful get(); refcount is bumped by acquire() / decremented by
+  // release() so the sweeper never evicts a project with in-flight ops.
+  private lastTouchedAt = new Map<string, number>();
+  private refcount = new Map<string, number>();
+  private sweepHandle: NodeJS.Timeout | null = null;
+  private sweepConfig: IdleSweepConfig | null = null;
+  private evictionStats: EvictionStats = {
+    evictionsTotal: 0,
+    lastEvictionAt: null,
+    lastEvictionProjects: [],
+    sweepsRun: 0,
+    lastSweepAt: null,
+  };
+  private nowFn: () => number = Date.now;
+
   constructor(private instance: InstanceConfig) {}
+
+  /** Test seam — override the time source so sweeper logic is testable. */
+  setNowFn(fn: () => number): void {
+    this.nowFn = fn;
+  }
 
   getInstance(): InstanceConfig {
     return this.instance;
@@ -68,10 +114,17 @@ export class EnginePool {
   // same project await the same init promise so we don't double-init.
   async get(name: string): Promise<Result<MaadEngine>> {
     const cached = this.engines.get(name);
-    if (cached) return ok(cached);
+    if (cached) {
+      this.lastTouchedAt.set(name, this.nowFn());
+      return ok(cached);
+    }
 
     const inFlight = this.initPromises.get(name);
-    if (inFlight) return inFlight;
+    if (inFlight) {
+      const r = await inFlight;
+      if (r.ok) this.lastTouchedAt.set(name, this.nowFn());
+      return r;
+    }
 
     const project = getProject(this.instance, name);
     if (!project) {
@@ -82,11 +135,42 @@ export class EnginePool {
     this.initPromises.set(name, initPromise);
     try {
       const result = await initPromise;
-      if (result.ok) this.engines.set(name, result.value);
+      if (result.ok) {
+        this.engines.set(name, result.value);
+        this.lastTouchedAt.set(name, this.nowFn());
+      }
       return result;
     } finally {
       this.initPromises.delete(name);
     }
+  }
+
+  /**
+   * 0.7.3 — In-flight refcount. Caller increments before invoking the
+   * handler, decrements in finally. The idle sweeper refuses to evict any
+   * project with refcount > 0.
+   */
+  acquire(name: string): void {
+    this.refcount.set(name, (this.refcount.get(name) ?? 0) + 1);
+    this.lastTouchedAt.set(name, this.nowFn());
+  }
+
+  release(name: string): void {
+    const cur = this.refcount.get(name) ?? 0;
+    if (cur <= 1) {
+      this.refcount.delete(name);
+    } else {
+      this.refcount.set(name, cur - 1);
+    }
+    this.lastTouchedAt.set(name, this.nowFn());
+  }
+
+  refcountFor(name: string): number {
+    return this.refcount.get(name) ?? 0;
+  }
+
+  lastTouchedFor(name: string): number | null {
+    return this.lastTouchedAt.get(name) ?? null;
   }
 
   private async initEngine(project: ProjectConfig): Promise<Result<MaadEngine>> {
@@ -97,16 +181,94 @@ export class EnginePool {
     return ok(engine);
   }
 
-  // Public eviction seam. v1 never calls this internally — 0.9.0 can layer
-  // LRU/TTL policy on top. Closes SQLite cleanly before removing.
+  // Public eviction seam. 0.7.3 — also called by the idle sweeper. Closes
+  // SQLite cleanly before removing. Refcount-protected callers should check
+  // refcount before calling; this method is unconditional.
   async evict(name: string): Promise<void> {
     const engine = this.engines.get(name);
     if (!engine) return;
     engine.close();
     this.engines.delete(name);
+    this.lastTouchedAt.delete(name);
+    this.refcount.delete(name);
+  }
+
+  /**
+   * 0.7.3 — Idle eviction sweep. Returns the names of projects evicted in
+   * this sweep. Skips projects with refcount > 0 (in-flight ops) and any
+   * project whose lastTouchedAt is missing (defensive — would mean it's not
+   * actually loaded). idleTimeoutMs=0 is a no-op (eviction disabled).
+   */
+  async evictIdle(idleTimeoutMs: number): Promise<string[]> {
+    this.evictionStats.sweepsRun++;
+    this.evictionStats.lastSweepAt = new Date(this.nowFn());
+    if (idleTimeoutMs <= 0) return [];
+
+    const now = this.nowFn();
+    const candidates: string[] = [];
+    for (const name of this.engines.keys()) {
+      if ((this.refcount.get(name) ?? 0) > 0) continue;
+      const touched = this.lastTouchedAt.get(name);
+      if (touched === undefined) continue;
+      if (now - touched >= idleTimeoutMs) candidates.push(name);
+    }
+
+    for (const name of candidates) await this.evict(name);
+
+    if (candidates.length > 0) {
+      this.evictionStats.evictionsTotal += candidates.length;
+      this.evictionStats.lastEvictionAt = new Date(now);
+      this.evictionStats.lastEvictionProjects = candidates;
+    }
+    return candidates;
+  }
+
+  /**
+   * 0.7.3 — Start the background idle sweeper. Idempotent — calling twice
+   * replaces the existing schedule. Use stopIdleSweeper() during shutdown.
+   * Sweep timer is unref()'d so it never blocks process exit.
+   */
+  startIdleSweeper(config: IdleSweepConfig): void {
+    this.stopIdleSweeper();
+    this.sweepConfig = config;
+    if (config.idleTimeoutMs <= 0 || config.sweepIntervalMs <= 0) return;
+    this.sweepHandle = setInterval(() => {
+      void this.evictIdle(config.idleTimeoutMs).catch(() => { /* sweeper is best-effort */ });
+    }, config.sweepIntervalMs);
+    if (typeof this.sweepHandle.unref === 'function') this.sweepHandle.unref();
+  }
+
+  stopIdleSweeper(): void {
+    if (this.sweepHandle) {
+      clearInterval(this.sweepHandle);
+      this.sweepHandle = null;
+    }
+    this.sweepConfig = null;
+  }
+
+  evictionStatsSnapshot(): EvictionStats {
+    return { ...this.evictionStats, lastEvictionProjects: [...this.evictionStats.lastEvictionProjects] };
+  }
+
+  idleSweepConfig(): IdleSweepConfig | null {
+    return this.sweepConfig ? { ...this.sweepConfig } : null;
+  }
+
+  static readIdleSweepEnv(env: NodeJS.ProcessEnv = process.env): IdleSweepConfig {
+    // Default: 30 min idle timeout, 60s sweep interval. Set
+    // MAAD_PROJECT_IDLE_TIMEOUT_MS=0 to disable.
+    const idleRaw = env.MAAD_PROJECT_IDLE_TIMEOUT_MS;
+    const sweepRaw = env.MAAD_PROJECT_SWEEP_INTERVAL_MS;
+    const idle = idleRaw !== undefined ? Number.parseInt(idleRaw, 10) : 30 * 60 * 1000;
+    const sweep = sweepRaw !== undefined ? Number.parseInt(sweepRaw, 10) : 60 * 1000;
+    return {
+      idleTimeoutMs: Number.isFinite(idle) && idle >= 0 ? idle : 30 * 60 * 1000,
+      sweepIntervalMs: Number.isFinite(sweep) && sweep > 0 ? sweep : 60 * 1000,
+    };
   }
 
   async closeAll(): Promise<void> {
+    this.stopIdleSweeper();
     for (const [name, engine] of this.engines) {
       try {
         engine.close();
@@ -115,6 +277,8 @@ export class EnginePool {
       }
       this.engines.delete(name);
     }
+    this.lastTouchedAt.clear();
+    this.refcount.clear();
   }
 
   /**

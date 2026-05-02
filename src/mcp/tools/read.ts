@@ -9,6 +9,7 @@ import { docId, docType, type ObjectQuery } from '../../types.js';
 import { resultToResponse, attachMeta, guardResponseSize } from '../response.js';
 import type { InstanceCtx } from '../ctx.js';
 import { withEngine } from '../with-session.js';
+import { hydrateQueryRows } from '../query-depth.js';
 
 export function register(server: McpServer, ctx: InstanceCtx): number {
   server.registerTool('maad_get', {
@@ -28,7 +29,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
   }));
 
   server.registerTool('maad_query', {
-    description: 'Finds documents by type with optional field filters and projection. Filters support shorthand eq, single-op, between shortcut, and array-of-ops (AND semantics). Use fields to return frontmatter values inline instead of chasing IDs.',
+    description: 'Finds documents by type with optional field filters and projection. Filters support shorthand eq, single-op, between shortcut, and array-of-ops (AND semantics). Use fields to return frontmatter values inline instead of chasing IDs. Set depth=cold to return record bodies inline (kills query-then-N-gets pattern), depth=full to return full composite (refs+objects+related) per row.',
     inputSchema: z.object({
       docType: z.string().describe('Document type to query'),
       filters: z.any().optional().describe('Field filters. Shorthand: { status: "active" }. Single op: { opened_at: { op: "gte", value: "2026-01-01" } }. Range shortcut: { opened_at: { op: "between", value: ["2026-03-01", "2026-03-31"] } }. Array-of-ops (AND): { opened_at: [{op: "gte", value: "2026-03-01"}, {op: "lte", value: "2026-03-31"}] }. Ops: eq, neq, gt, gte, lt, lte, in, contains, between.'),
@@ -37,10 +38,12 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       sortOrder: z.enum(['asc', 'desc']).optional().describe('Sort direction (default desc)'),
       limit: z.number().optional().describe('Max results (default 50, capped at 500). Over-requests are clamped silently with _meta.limit_clamped set.'),
       offset: z.number().optional().describe('Skip first N results'),
+      depth: z.enum(['hot', 'cold', 'full']).optional().describe('hot (default) = pointer + projected fields only; cold = adds body to each row; full = adds resolved composite (refs+objects+related). cold/full bound by depth_max_results (default 50, capped at 100) to prevent payload blowups.'),
+      depthMaxResults: z.number().optional().describe('When depth=cold|full, hydrate at most N rows (default 50, capped at 100). Beyond cap, remaining rows return at hot depth.'),
       includeFilePath: z.boolean().optional().describe('Include filePath in each result row (default false — omitted to trim response size)'),
       project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
-  }, async (args, extra) => withEngine(ctx, extra, 'maad_query', args, ({ engine }) => {
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_query', args, async ({ engine }) => {
     const query: import('../../types.js').DocumentQuery = { docType: docType(args.docType) };
     if (args.filters !== undefined) query.filters = args.filters as any;
     if (args.fields !== undefined) query.fields = args.fields;
@@ -66,10 +69,30 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       if (result.value.limitClamped) newValue.limitClamped = result.value.limitClamped;
       effective = { ok: true, value: newValue } as typeof result;
     }
+
+    // 0.7.3 (fup-2026-079[a]) — depth hydration. Composite that kills the
+    // query-then-N-gets agent pattern.
+    let depthMeta: { depth: string; hydrated: number; capped?: boolean } | null = null;
+    if (effective.ok && (args.depth === 'cold' || args.depth === 'full')) {
+      const hydrateOpts: { depth: 'cold' | 'full'; depthMaxResults?: number } = { depth: args.depth };
+      if (args.depthMaxResults !== undefined) hydrateOpts.depthMaxResults = args.depthMaxResults;
+      const outcome = await hydrateQueryRows(engine, effective.value.results, hydrateOpts);
+      const newValue: import('../../engine/types.js').FindResult = {
+        total: effective.value.total,
+        results: outcome.rows as typeof effective.value.results,
+      };
+      if (effective.value.limitClamped) newValue.limitClamped = effective.value.limitClamped;
+      effective = { ok: true, value: newValue } as typeof effective;
+      depthMeta = outcome.meta;
+    }
+
     let response = resultToResponse(effective, 'maad_query');
     // 0.7.1 — surface engine limit-clamping in _meta, then guard response size.
     if (effective.ok && effective.value.limitClamped) {
       response = attachMeta(response, { limit_clamped: effective.value.limitClamped });
+    }
+    if (depthMeta) {
+      response = attachMeta(response, { depth: depthMeta });
     }
     return guardResponseSize(response, { tool: 'maad_query' });
   }));

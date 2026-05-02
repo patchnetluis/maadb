@@ -16,7 +16,7 @@ import { setGuardrailConfig } from './guardrails.js';
 import { setProvenanceMode } from './response.js';
 import { initIdempotencyCache, readIdempotencyEnv } from './idempotency.js';
 import { initRateLimiter, readRateLimitEnv } from './rate-limit.js';
-import { initLogging, readLoggingEnv } from '../logging.js';
+import { initLogging, readLoggingEnv, logOpsChannelReady } from '../logging.js';
 import { installSignalHandlers } from './shutdown.js';
 import { installReloadSignalHandler } from './reload-signal.js';
 import { getRateLimiter } from './rate-limit.js';
@@ -90,6 +90,16 @@ export async function startServer(opts: ServeOptions): Promise<void> {
   setGuardrailConfig({ dryRun, toolAllowlist: opts.toolAllowlist });
   setProvenanceMode(provenance as any);
   initLogging(readLoggingEnv());
+  // 0.7.3 (fup-2026-096) — emit one self-check line so deploy validation can
+  // confirm the ops channel is wired before any tool call. If this line is
+  // missing in journalctl/stderr, no other ops event (commit_failed,
+  // rate_limited, validation_warning) will surface either.
+  const loggingEnv = readLoggingEnv();
+  logOpsChannelReady({
+    destination: loggingEnv.pretty ? 'pretty' : 'stderr',
+    level: loggingEnv.level ?? 'info',
+    pid: process.pid,
+  });
   initIdempotencyCache(readIdempotencyEnv());
   initRateLimiter(readRateLimitEnv());
 
@@ -111,6 +121,9 @@ export async function startServer(opts: ServeOptions): Promise<void> {
 
   // Build the instance-scoped runtime context
   const pool = new EnginePool(instance);
+  // 0.7.3 (fup-2026-150) — start idle-timeout sweeper. Defaults: 30 min idle,
+  // 60s sweep. Set MAAD_PROJECT_IDLE_TIMEOUT_MS=0 to disable.
+  pool.startIdleSweeper(EnginePool.readIdleSweepEnv());
   const sessions = new SessionRegistry(instance);
   const ctx: InstanceCtx = { instance, pool, sessions, tokens };
 

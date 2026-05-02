@@ -13,6 +13,7 @@ import type { InstanceCtx } from '../ctx.js';
 import { withEngine } from '../with-session.js';
 import { withIdempotency } from '../idempotency.js';
 import { getRateLimiter } from '../rate-limit.js';
+import { checkBulkSize as checkBulkSizeRaw } from '../bulk-cap.js';
 import { logWriteAudit, logValidationWarning } from '../../logging.js';
 import type { ValidationWarning } from '../../types.js';
 import { notifyWrite, type ChangeEvent } from '../notifications.js';
@@ -26,6 +27,19 @@ function checkWriteRate(sessionId: string, toolName: string): ReturnType<typeof 
       limit: rejection.limit,
       retryAfterMs: rejection.retryAfterMs,
       tool: toolName,
+    }),
+  ]);
+}
+
+function checkBulkSize(toolName: string, count: number): ReturnType<typeof errorResponse> | null {
+  const rejection = checkBulkSizeRaw(toolName, count);
+  if (!rejection) return null;
+  return errorResponse([
+    maadError('BULK_LIMIT_EXCEEDED', rejection.message, undefined, {
+      tool: rejection.tool,
+      received: rejection.received,
+      limit: rejection.limit,
+      suggestedChunkSize: rejection.suggestedChunkSize,
     }),
   ]);
 }
@@ -251,7 +265,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
   }));
 
   server.registerTool('maad_bulk_create', {
-    description: 'Creates multiple records in one call. Validates each record, writes files, single git commit. Returns per-record success/failure. Much faster than individual creates for imports.',
+    description: 'Creates multiple records in one call. Validates each record, writes files, single git commit. Returns per-record success/failure. Much faster than individual creates for imports. Hard cap of 50 items per call (configurable via MAAD_BULK_MAX_ITEMS); oversize requests return BULK_LIMIT_EXCEEDED with chunking hint.',
     inputSchema: z.object({
       records: z.array(z.object({
         docType: z.string().describe('Document type'),
@@ -264,6 +278,8 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
     }),
   }, async (args, extra) => withEngine(ctx, extra, 'maad_bulk_create', args, async ({ engine, projectName, sessionId, requestId, role, token }) =>
     withIdempotency(projectName, 'maad_bulk_create', args.idempotencyKey, requestId, async () => {
+      const sizeRejection = checkBulkSize('maad_bulk_create', args.records.length);
+      if (sizeRejection) return sizeRejection;
       const rateRejection = checkWriteRate(sessionId, 'maad_bulk_create');
       if (rateRejection) return rateRejection;
       auditToolCall('maad_bulk_create', { count: args.records.length });
@@ -298,7 +314,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
   ));
 
   server.registerTool('maad_bulk_update', {
-    description: 'Updates multiple records in one call. Returns per-record success/failure.',
+    description: 'Updates multiple records in one call. Returns per-record success/failure. Hard cap of 50 items per call (configurable via MAAD_BULK_MAX_ITEMS); oversize requests return BULK_LIMIT_EXCEEDED.',
     inputSchema: z.object({
       updates: z.array(z.object({
         docId: z.string().describe('Document ID to update'),
@@ -311,6 +327,8 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
     }),
   }, async (args, extra) => withEngine(ctx, extra, 'maad_bulk_update', args, async ({ engine, projectName, sessionId, requestId, role, token }) =>
     withIdempotency(projectName, 'maad_bulk_update', args.idempotencyKey, requestId, async () => {
+      const sizeRejection = checkBulkSize('maad_bulk_update', args.updates.length);
+      if (sizeRejection) return sizeRejection;
       const rateRejection = checkWriteRate(sessionId, 'maad_bulk_update');
       if (rateRejection) return rateRejection;
       auditToolCall('maad_bulk_update', { count: args.updates.length });

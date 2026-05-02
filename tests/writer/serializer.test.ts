@@ -112,4 +112,55 @@ describe('serializeField', () => {
     const preciseDate = new Date('2026-04-16T17:20:30.500Z');
     expect(serializeField('started_at', preciseDate)).toBe('started_at: "2026-04-16T17:20:30.500Z"');
   });
+
+  // 0.7.3 — coercion-roundtrip guard (fup-2026-199). Any string whose
+  // unquoted YAML form parses back as a non-string corrupts on read. Earlier
+  // static checks (keywords, leading-digit-with-non-digit) miss all-digit and
+  // sci-notation literals. The guard parses the candidate back through the
+  // CORE_SCHEMA loader and forces quotes if `parsed !== originalString`.
+  describe('coercion-roundtrip guard (fup-2026-199)', () => {
+    it('quotes all-digit string (would parse as int)', () => {
+      // Real-world hit: jrn-2026-027 git_ref="4962218" emitted unquoted,
+      // re-read as the integer 4962218.
+      expect(serializeField('git_ref', '4962218')).toBe('git_ref: "4962218"');
+    });
+
+    it('quotes scientific-notation lookalike (would parse as float Infinity)', () => {
+      // Real-world hit: jrn-agent-setup git_ref="1e38892" → Infinity on read.
+      expect(serializeField('git_ref', '1e38892')).toBe('git_ref: "1e38892"');
+    });
+
+    it('quotes leading-zero digit string (would parse as int, losing zero)', () => {
+      expect(serializeField('code', '007')).toBe('code: "007"');
+    });
+
+    it('quotes float-shaped string', () => {
+      expect(serializeField('val', '3.14')).toBe('val: "3.14"');
+    });
+
+    it('quotes negative-int-shaped string', () => {
+      expect(serializeField('val', '-42')).toBe('val: "-42"');
+    });
+
+    it('leaves non-coercing strings unquoted (regression guard — guard must not over-quote)', () => {
+      // Plain identifiers should pass through unquoted. Short SHAs that
+      // start with a digit are already caught by the existing digit-prefix
+      // heuristic (e.g. `76a859c` → quoted) — that's a separate code path.
+      expect(serializeField('name', 'patchnet-internal')).toBe('name: patchnet-internal');
+      expect(serializeField('slug', 'agt-claude-dev')).toBe('slug: agt-claude-dev');
+      expect(serializeField('val', 'hello-world')).toBe('val: hello-world');
+    });
+
+    it('round-trips emitted output through CORE_SCHEMA as the same string', async () => {
+      const yaml = (await import('js-yaml')).default;
+      const cases = ['4962218', '1e38892', '007', '3.14', '-42', 'true', 'null', '76a859c'];
+      for (const original of cases) {
+        const emitted = serializeField('field', original);
+        const scalar = emitted.slice('field: '.length);
+        const parsed = yaml.load(`field: ${scalar}`, { schema: yaml.CORE_SCHEMA }) as { field: unknown };
+        expect(parsed.field).toBe(original);
+        expect(typeof parsed.field).toBe('string');
+      }
+    });
+  });
 });
