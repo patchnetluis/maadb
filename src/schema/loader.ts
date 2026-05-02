@@ -3,7 +3,8 @@
 // Reads and validates _schema/*.yaml files referenced by the registry.
 // ============================================================================
 
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
+import { statSync } from 'node:fs';
 import path from 'node:path';
 import { parseMatter } from '../parser/matter.js';
 import { ok, err, maadError, type Result, type MaadError } from '../errors.js';
@@ -27,6 +28,19 @@ export async function loadSchemas(projectRoot: string, registry: Registry): Prom
   const errors: MaadError[] = [];
   const schemas = new Map<SchemaRef, SchemaDefinition>();
   const typeToSchema = new Map<string, SchemaRef>();
+  // 0.7.7 (fup-2026-202) — capture mtime+size per file for staleness checks.
+  // Includes the registry file too, so registry edits (new/removed types,
+  // path/schemaRef remap) trigger reload alongside per-schema edits.
+  const cachedFiles = new Map<string, { mtimeMs: number; size: number }>();
+  const registryPath = path.join(projectRoot, '_registry', 'object_types.yaml');
+  try {
+    const st = await stat(registryPath);
+    cachedFiles.set(registryPath, { mtimeMs: st.mtimeMs, size: st.size });
+  } catch {
+    // Empty / missing registry — leave out of cache; isStale will pick up
+    // the file when it appears via stat throwing on a cached entry that
+    // doesn't exist. For an absent registry the schemas map is empty anyway.
+  }
 
   for (const [, regType] of registry.types) {
     const schemaFile = path.join(projectRoot, '_schema', `${regType.schemaRef}.yaml`);
@@ -34,6 +48,8 @@ export async function loadSchemas(projectRoot: string, registry: Registry): Prom
 
     try {
       raw = await readFile(schemaFile, 'utf-8');
+      const st = await stat(schemaFile);
+      cachedFiles.set(schemaFile, { mtimeMs: st.mtimeMs, size: st.size });
     } catch (e) {
       errors.push(maadError('SCHEMA_NOT_FOUND', `Schema file not found for type "${regType.name}": ${schemaFile}`));
       continue;
@@ -68,6 +84,7 @@ export async function loadSchemas(projectRoot: string, registry: Registry): Prom
 
   const store: SchemaStore = {
     schemas,
+    cachedFiles,
     getSchema(ref: SchemaRef) {
       return schemas.get(ref);
     },
@@ -75,6 +92,21 @@ export async function loadSchemas(projectRoot: string, registry: Registry): Prom
       const ref = typeToSchema.get(type as string);
       if (ref === undefined) return undefined;
       return schemas.get(ref);
+    },
+    isStale() {
+      // Sync stat — called on every write entry so latency matters; for the
+      // typical project (5-20 schemas) this is microseconds. Any disagreement
+      // with cached mtime/size is treated as stale; an absent file (cached
+      // but stat throws ENOENT) is also stale.
+      for (const [absPath, cached] of cachedFiles) {
+        try {
+          const st = statSync(absPath);
+          if (st.mtimeMs !== cached.mtimeMs || st.size !== cached.size) return true;
+        } catch {
+          return true;
+        }
+      }
+      return false;
     },
   };
 

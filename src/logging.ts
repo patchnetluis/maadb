@@ -250,6 +250,24 @@ export function logOpsChannelReady(fields: OpsChannelReadyFields): void {
   opsLog.info(fields, 'ops_channel_ready');
 }
 
+// ---- Schema cache stale event (ops) ---------------------------------------
+// 0.7.7 (fup-2026-202) — emitted when the engine detects that another process
+// edited the registry/schema files since our last load and forces a reload
+// before processing a write. Operators tracking how often cross-process
+// schema-cache drift fires watch this event; high frequency suggests the
+// deploy needs a different coordination strategy (single writer per project,
+// or schema-edit-via-MCP-only). Low/zero frequency means the cache is stable.
+
+export interface SchemaCacheStaleFields {
+  project: string | null;
+  trigger_op: string;
+  changed_files: string[];
+}
+
+export function logSchemaCacheStale(fields: SchemaCacheStaleFields): void {
+  opsLog.warn(fields, 'schema_cache_stale');
+}
+
 // ---- Commit failure event (ops) -------------------------------------------
 // 0.6.10 — emitted when a git commit attached to a write fails (stage
 // succeeded but commit threw / returned no sha / status threw). Before this

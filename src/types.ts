@@ -259,6 +259,20 @@ export interface SchemaStore {
   schemas: Map<SchemaRef, SchemaDefinition>;
   getSchema(ref: SchemaRef): SchemaDefinition | undefined;
   getSchemaForType(type: DocType): SchemaDefinition | undefined;
+  /**
+   * 0.7.7 (fup-2026-202) — per-file mtime + size captured at load time.
+   * Keyed by absolute path. Used by `isStale()` to detect cross-process
+   * schema edits; if any cached file's on-disk mtime/size has drifted, a
+   * concurrent process edited the schema and our in-memory copy is stale.
+   */
+  cachedFiles: Map<string, { mtimeMs: number; size: number }>;
+  /**
+   * 0.7.7 — Returns true when any cached schema file's on-disk
+   * mtime/size differs from what was captured at load time, OR a cached
+   * file no longer exists. Cheap (one fstat per cached file). Triggered
+   * from the engine write-mutex entry so every write sees fresh schemas.
+   */
+  isStale(): boolean;
 }
 
 // --- Bound Document (Stage 4 output) ---------------------------------------

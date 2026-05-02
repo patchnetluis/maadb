@@ -29,6 +29,7 @@ import type {
 } from '../types.js';
 import { loadRegistry } from '../registry/index.js';
 import { loadSchemas } from '../schema/index.js';
+import { logSchemaCacheStale } from '../logging.js';
 import { SqliteBackend } from '../backend/index.js';
 import type { MaadBackend } from '../backend/index.js';
 import { GitLayer } from '../git/index.js';
@@ -181,6 +182,14 @@ export class MaadEngine {
     const startedAtMs = Date.now();
     this.lastWriteOp = { op, startedAtMs };
     try {
+      // 0.7.7 (fup-2026-202) — every write op enters here. Before running
+      // fn() we check whether another process has edited registry/schemas
+      // on disk since our last load; if so, reload schemas in-place so the
+      // write uses fresh schema (correct field_index entries). Skip for
+      // 'reload' itself — it's about to re-init everything regardless.
+      if (op !== 'reload' && this.initialized) {
+        await this.reloadSchemasIfStale(op);
+      }
       const result = await writeScope.run(this, () => fn());
       // Record last-write timestamp for health reporting. Successful and
       // error-result writes both touch this — every mutating attempt counts
@@ -295,6 +304,55 @@ export class MaadEngine {
       this.initialized = false;
       return this.init(this.projectRoot, { readOnly: this._readOnly });
     });
+  }
+
+  /**
+   * 0.7.7 (fup-2026-202) — Lightweight in-place reload of registry + schemas.
+   * Triggered from `runExclusive` when `schemaStore.isStale()` reports drift
+   * (another process edited the schema/registry files since our last load).
+   *
+   * Does NOT reset the backend or git layer — only the in-memory schema and
+   * registry refs are swapped. Cheap enough to run as a defensive check on
+   * every write entry; the staleness probe (a handful of fstat calls) takes
+   * microseconds and the actual reload only fires when files actually
+   * changed. Failure path: log and proceed with the stale schema rather than
+   * blocking the write — a rare case (schema deleted mid-flight) where doing
+   * nothing is the lesser harm.
+   */
+  private async reloadSchemasIfStale(triggerOp: string): Promise<void> {
+    if (!this.schemaStore.isStale()) return;
+    const changedFiles: string[] = [];
+    for (const [absPath, cached] of this.schemaStore.cachedFiles) {
+      try {
+        const st = statSync(absPath);
+        if (st.mtimeMs !== cached.mtimeMs || st.size !== cached.size) {
+          changedFiles.push(absPath);
+        }
+      } catch {
+        changedFiles.push(absPath);
+      }
+    }
+    logSchemaCacheStale({
+      project: null,
+      trigger_op: triggerOp,
+      changed_files: changedFiles,
+    });
+    const regResult = await loadRegistry(this.projectRoot);
+    if (!regResult.ok) {
+      logger.bestEffort('engine', 'reloadSchemasIfStale.registry',
+        `registry reload failed; proceeding with stale registry`,
+        { errors: regResult.errors.map(e => `${e.code}: ${e.message}`).join('; ') });
+      return;
+    }
+    const schemaResult = await loadSchemas(this.projectRoot, regResult.value);
+    if (!schemaResult.ok) {
+      logger.bestEffort('engine', 'reloadSchemasIfStale.schemas',
+        `schema reload failed; proceeding with stale schemas`,
+        { errors: schemaResult.errors.map(e => `${e.code}: ${e.message}`).join('; ') });
+      return;
+    }
+    this.registry = regResult.value;
+    this.schemaStore = schemaResult.value;
   }
 
   health(): HealthReport {

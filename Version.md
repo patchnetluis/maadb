@@ -1,9 +1,26 @@
 ---
 enabled: true
-current: 0.7.6
+current: 0.7.7
 ---
 
 # Version History
+
+## 0.7.7 — 2026-05-01
+Schema-cache coherence across concurrent writers (fup-2026-202).
+
+Pre-0.7.7, when two engine processes shared the same backend (same project directory, same SQLite database), each held its own in-memory schema cache. If process A edited a schema file on disk and called `maad_reload`, process A's in-memory schemas reflected the edit. Process B's in-memory schemas did not. When process B then ran `maad_update` on a doc, `processDocument` rewrote that doc's `field_index` entries using B's stale view of the schema — silently clobbering correct entries that A's prior `indexAll` had populated. No error, no log line. The visible symptom was a query missing records that obviously matched the filter on disk.
+
+The exact bug was reproduced live on 2026-05-01: a separate concurrent agent session edited a record after this session reloaded a schema; SQLite inspection confirmed the affected record had every other field indexed but zero rows for the newly-indexed list field. Recovery required a manual `maad_reindex --force` from a process with fresh schema.
+
+Fix: `SchemaStore` now captures mtime + size per file at load time (in a `cachedFiles: Map<absolutePath, {mtimeMs, size}>`) covering each `_schema/*.yaml` plus `_registry/object_types.yaml`. New method `SchemaStore.isStale(): boolean` re-stats each cached file synchronously and returns true if any mtime or size has drifted, or if a cached file no longer exists. The engine's `runExclusive` entry — the chokepoint every write op flows through — calls `isStale()` before invoking the handler. On drift, the engine runs a lightweight in-place reload (re-reads registry + schemas, swaps refs) without touching the backend or git layer, and emits a `schema_cache_stale` ops event with the trigger op name and the list of changed files. The next write proceeds with fresh schemas.
+
+Cost on the no-drift path: one `fstat` per cached schema file (~microseconds). Schema edits are rare; the staleness check is cheap; the reload only fires when files actually changed. The `reload` op itself skips the staleness check (it's about to re-init everything regardless), preventing redundant work.
+
+Failure handling: if registry or schema reload fails mid-write (e.g., a schema file was edited into invalid YAML), the engine logs a best-effort warning and proceeds with the existing in-memory schemas rather than blocking the write — a rare edge case where doing nothing is the lesser harm.
+
+Tests: 6 new in `tests/engine/schema-cache-coherence.test.ts` cover the staleness probe (no-drift, content edit, mtime-only edit via `utimes`) plus end-to-end create + update flows that mutate a schema mid-session and verify the indexed-field-filter query returns the doc (the canary for silent corruption). 817 tests passing (+6 over 0.7.6 baseline).
+
+No new dependencies. No breaking changes. New ops event: `schema_cache_stale`. No new error codes. Internal-only API addition: `SchemaStore.cachedFiles` and `SchemaStore.isStale()` — direct callers can now ask whether their cache is fresh, but most won't need to.
 
 ## 0.7.6 — 2026-05-01
 Parser / write-path security hardening (fup-2026-200).
@@ -197,7 +214,7 @@ Initial engine build. Parser, registry, schema, extractor (11 primitives), SQLit
 
 Phase plan locked in `dec-maadb-070-optimization-track` (2026-04-21). Releases through 0.8.0 form an agent-first optimization track; 0.8.5+ unchanged from prior roadmap.
 
-- **0.7.7** — Agent-First Engine (renumbered from 0.7.5 after Unix-socket transport landed there). `maad_status` cross-project rollup, followup `supersedes` schema field, canonical `_skills/session-protocol.md` in engine. Plus remaining composites that collapse common call chains: `maad_bulk_update_where`, `maad_context(docId)`, `maad_get_many`, `maad_related depth: 'hydrated'`, `maad_subscribe_from(cursor)`. (`maad_query depth: 'cold'|'full'` shipped early in 0.7.3.)
+- **0.7.9** — Agent-First Engine (renumbered after schema-cache coherence took 0.7.7). `maad_status` cross-project rollup, followup `supersedes` schema field, canonical `_skills/session-protocol.md` in engine. Plus remaining composites that collapse common call chains: `maad_bulk_update_where`, `maad_context(docId)`, `maad_get_many`, `maad_related depth: 'hydrated'`, `maad_subscribe_from(cursor)`. (`maad_query depth: 'cold'|'full'` shipped early in 0.7.3.)
 - **0.7.8** — Cleanup Wave 1 (renumbered from 0.7.6 after security hardening landed there). Safe mass-cleanup primitives — all destructive tools default to dry-run with `confirm: true` required: `maad_bulk_delete`, `maad_delete_where`, `maad_repair_where`, `maad_find_orphans`, `maad_purge_soft_deleted`.
 - **0.8.0** — Operational Hygiene + Imports. `maad_prune_sessions` (stale-session sweeper), `maad_compact` (`VACUUM` + `git gc`), `maad_reindex_selective`, `maad_find_duplicates` + original Import workflow: `_inbox/` convention, source tracking, duplicate detection, readonly type flag.
 - **0.8.5** — Remote MCP hardening: per-connection role tiers, rate-limit policy, backpressure thresholds, mutex timeout, stress suite, metrics export, `git gc` automation.
