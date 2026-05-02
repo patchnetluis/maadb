@@ -116,6 +116,24 @@ Runtime layout, client to storage:
 
 ## Quick start
 
+### Install
+
+Published on npm as [`@maadb/core`](https://www.npmjs.com/package/@maadb/core). No clone needed.
+
+```bash
+# Run directly without installing
+npx @maadb/core --help
+
+# Or install globally
+npm install -g @maadb/core
+maad --help
+
+# Or add as a project dependency
+npm install @maadb/core
+```
+
+To work on the engine itself, clone and build:
+
 ```bash
 git clone https://github.com/maadb/maadb.git
 cd maadb
@@ -130,9 +148,9 @@ Wire up MCP in your agent (`.mcp.json` in the project directory):
 {
   "mcpServers": {
     "maad": {
-      "command": "node",
+      "command": "npx",
       "args": [
-        "/absolute/path/to/maadb/dist/cli.js",
+        "-y", "@maadb/core",
         "--project", "/absolute/path/to/my-project",
         "serve",
         "--role", "admin"
@@ -141,6 +159,8 @@ Wire up MCP in your agent (`.mcp.json` in the project directory):
   }
 }
 ```
+
+(Or use `node /absolute/path/to/maadb/dist/cli.js ...` if running from a checkout.)
 
 Same shape for Claude Desktop (`claude_desktop_config.json`) and OpenClaw. Any MCP-compatible agent works — stdio is the default, HTTP/SSE is available since 0.5.0.
 
