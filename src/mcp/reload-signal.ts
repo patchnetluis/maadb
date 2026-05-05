@@ -47,7 +47,9 @@ export function installReloadSignalHandler(ctx: InstanceCtx): void {
       // failure here doesn't roll back the instance reload. Captures of
       // ctx.tokens elsewhere (the HTTP transport closure) stay valid because
       // TokenStore.reload mutates the existing instance in-place.
-      if (ctx.tokens !== null) {
+      // Loose null check (`!= null`) catches both null and undefined — test
+      // harnesses sometimes pass partial ctx objects without a tokens field.
+      if (ctx.tokens != null) {
         const tokensResult = await ctx.tokens.reload();
         if (!tokensResult.ok) {
           const first = tokensResult.errors[0];
