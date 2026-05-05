@@ -4,7 +4,8 @@
 [![Node.js](https://img.shields.io/badge/node-%E2%89%A524-brightgreen.svg)](package.json)
 [![TypeScript](https://img.shields.io/badge/typescript-strict-blue.svg)](tsconfig.json)
 [![Tests](https://img.shields.io/badge/tests-817%20passing-brightgreen.svg)](tests)
-[![Version](https://img.shields.io/badge/version-0.7.8-purple.svg)](Version.md)
+[![npm](https://img.shields.io/npm/v/@maadb/core.svg)](https://www.npmjs.com/package/@maadb/core)
+[![Version](https://img.shields.io/badge/version-0.7.9-purple.svg)](Version.md)
 
 > **Markdown is the database. The engine makes it queryable.**
 
@@ -347,9 +348,10 @@ In multi-project mode, session tools are always available pre-bind: `maad_projec
 
 ## Current state
 
-**Current:** v0.7.8 — Repository hygiene + dependency tightening + Node 24 baseline. No engine code changes.
+**Current:** v0.7.9 — First npm publish via Trusted Publishers (OIDC). Package now installable as `@maadb/core`. No engine code changes.
 
 Recent shipped scope:
+- **0.7.8** — Repository hygiene, dependency tightening, Node 24 baseline
 - **0.7.7** — Schema-cache coherence across concurrent writers (silent index-corruption fix)
 - **0.7.6** — Parser / write-path security hardening (`INVALID_DOC_ID` validator + path-containment guards)
 - **0.7.5** — Unix domain socket transport (`MAAD_TRANSPORT=unix`)

@@ -1,9 +1,18 @@
 ---
 enabled: true
-current: 0.7.8
+current: 0.7.9
 ---
 
 # Version History
+
+## 0.7.9 — 2026-05-05
+First npm publish via Trusted Publishers (OIDC).
+
+Package transitions from `@maadb/core` name reservation (0.0.1, published as a placeholder during scope setup) to first real release at 0.7.9. Auth path is npm Trusted Publishers — short-lived OIDC tokens minted by GitHub Actions, no long-lived `NODE_AUTH_TOKEN` in repo secrets. The publish workflow (`.github/workflows/publish.yml`) triggers on `v*` tag push, gates on a `npm-publish` GitHub Environment with required-reviewer protection (admin bypass disabled), verifies `package.json` version matches the tag, and publishes with `--provenance` so each release ships verifiable build attestations.
+
+README refreshed: dynamic npm version badge added, version badge bumped, Current state line updated, 0.7.8 rotated into Recent shipped scope. No engine code changes — 817 tests passing, identical to 0.7.8.
+
+§Planned cascade renumbered after 0.7.9 was used for the first npm publish: Cleanup Wave 1 → 0.7.10, Agent-First Engine → 0.7.11.
 
 ## 0.7.8 — 2026-05-02
 Repository hygiene + dependency tightening + Node 24 baseline.
@@ -227,8 +236,8 @@ Initial engine build. Parser, registry, schema, extractor (11 primitives), SQLit
 
 Phase plan locked in `dec-maadb-070-optimization-track` (2026-04-21). Releases through 0.8.0 form an agent-first optimization track; 0.8.5+ unchanged from prior roadmap.
 
-- **0.7.10** — Agent-First Engine (renumbered after 0.7.8 was used for repo housekeeping + Node 24 baseline). `maad_status` cross-project rollup, followup `supersedes` schema field, canonical `_skills/session-protocol.md` in engine. Plus remaining composites that collapse common call chains: `maad_bulk_update_where`, `maad_context(docId)`, `maad_get_many`, `maad_related depth: 'hydrated'`, `maad_subscribe_from(cursor)`. (`maad_query depth: 'cold'|'full'` shipped early in 0.7.3.)
-- **0.7.9** — Cleanup Wave 1 (renumbered after 0.7.8 was used for repo housekeeping). Safe mass-cleanup primitives — all destructive tools default to dry-run with `confirm: true` required: `maad_bulk_delete`, `maad_delete_where`, `maad_repair_where`, `maad_find_orphans`, `maad_purge_soft_deleted`.
+- **0.7.11** — Agent-First Engine (renumbered after 0.7.9 was used for first npm publish). `maad_status` cross-project rollup, followup `supersedes` schema field, canonical `_skills/session-protocol.md` in engine. Plus remaining composites that collapse common call chains: `maad_bulk_update_where`, `maad_context(docId)`, `maad_get_many`, `maad_related depth: 'hydrated'`, `maad_subscribe_from(cursor)`. (`maad_query depth: 'cold'|'full'` shipped early in 0.7.3.)
+- **0.7.10** — Cleanup Wave 1 (renumbered after 0.7.9 was used for first npm publish). Safe mass-cleanup primitives — all destructive tools default to dry-run with `confirm: true` required: `maad_bulk_delete`, `maad_delete_where`, `maad_repair_where`, `maad_find_orphans`, `maad_purge_soft_deleted`.
 - **0.8.0** — Operational Hygiene + Imports. `maad_prune_sessions` (stale-session sweeper), `maad_compact` (`VACUUM` + `git gc`), `maad_reindex_selective`, `maad_find_duplicates` + original Import workflow: `_inbox/` convention, source tracking, duplicate detection, readonly type flag.
 - **0.8.5** — Remote MCP hardening: per-connection role tiers, rate-limit policy, backpressure thresholds, mutex timeout, stress suite, metrics export, `git gc` automation.
 - **0.9.0** — Eviction Stage 2 + query power: LRU + hard pool cap (Stage 1 idle-timeout shipped in 0.7.3), in-place project mutations (lifts `INSTANCE_MUTATION_UNSUPPORTED`), FTS5, fuzzy entity matching, compound filters (AND/OR), cursor-based pagination.
