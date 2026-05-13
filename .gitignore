@@ -28,6 +28,7 @@ CHANGELOG.md
 # Local scratch (instance configs, throwaway data)
 scratch/
 
-# Shipped-version specs live here locally for reference. Not tracked — the
+# Spec docs — in-flight (docs/specs/) and shipped-for-reference (docs/archive/) — stay local.
 # Version.md history and brain decision records carry the durable rationale.
+docs/specs/
 docs/archive/
