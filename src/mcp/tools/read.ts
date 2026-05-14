@@ -220,6 +220,25 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
     return resultToResponse({ ok: false, errors: [{ code: 'INVALID_ARGS', message: 'mode must be "field", "count", or "integrity"' }] } as any, 'maad_verify');
   }));
 
+  server.registerTool('maad_find_orphans', {
+    description: 'Inventory records with broken refs — frontmatter ref fields pointing at docIds that do not exist in the index. Convenience wrapper over maad_verify integrity mode (categories: ["broken_refs"], verbose: true). Use before any repair workflow to see what would be cleaned up.',
+    inputSchema: z.object({
+      docType: z.string().optional().describe('Restrict scan to one docType'),
+      docId: z.string().optional().describe('Restrict scan to a single record'),
+      filters: z.any().optional().describe('Field filters (same format as maad_query). Only records already in the index are in scope when filter is set.'),
+      project: z.string().optional().describe('Project name (multi-project mode only)'),
+    }),
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_find_orphans', args, async ({ engine }) => {
+    const integrityQuery: import('../../engine/types.js').IntegrityQuery = {
+      categories: ['broken_refs'],
+      verbose: true,
+    };
+    if (args.docType !== undefined) integrityQuery.docType = docType(args.docType);
+    if (args.docId !== undefined) integrityQuery.docId = docId(args.docId);
+    if (args.filters !== undefined) integrityQuery.filter = args.filters as Record<string, import('../../types.js').FilterCondition>;
+    return resultToResponse(await engine.verifyIntegrity(integrityQuery), 'maad_find_orphans');
+  }));
+
   server.registerTool('maad_join', {
     description: 'Queries documents and follows ref fields to return projected fields from both source and target records in one call. Eliminates N+1 round-trips. Example: all cases with their client name and attorney name.',
     inputSchema: z.object({
@@ -261,5 +280,5 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
     return resultToResponse(engine.changesSince(q), 'maad_changes_since');
   }));
 
-  return 9;
+  return 10;
 }
