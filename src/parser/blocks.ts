@@ -11,7 +11,9 @@ const ANCHOR_REGEX = /\s*\{#([a-zA-Z0-9_-]+)\}\s*$/;
 const FENCE_OPEN_REGEX = /^(`{3,}|~{3,})/;
 
 export function parseBlocks(body: string, bodyStartLine: number): ParsedBlock[] {
-  const lines = body.split('\n');
+  // Strip trailing CR per line so $-anchored regexes (ATX heading, anchor)
+  // match on CRLF input. No-op on LF-only content — Unix output unchanged.
+  const lines = body.split('\n').map(l => l.endsWith('\r') ? l.slice(0, -1) : l);
   const blocks: ParsedBlock[] = [];
   let inFence = false;
   let fenceChar = '';
