@@ -346,6 +346,28 @@ export interface IntegrityQuery {
   verbose?: boolean;
 }
 
+// ----------------------------------------------------------------------------
+// 0.7.10 — maad_backup: named recovery anchors via annotated git tags.
+// Tag format: maad-snapshot-YYYY-MM-DD-HHMM[-<label>] (UTC).
+// ----------------------------------------------------------------------------
+
+export interface BackupTag {
+  tag: string;
+  sha: string;
+  message: string;
+  createdAt: string;
+}
+
+export interface CreateBackupOptions {
+  label?: string;
+  message?: string;
+}
+
+export interface ListBackupsOptions {
+  /** ISO8601 — only return tags created at or after this timestamp. */
+  since?: string;
+}
+
 export interface SchemaInfoResult {
   type: string;
   idPrefix: string;

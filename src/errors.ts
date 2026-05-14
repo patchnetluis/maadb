@@ -76,7 +76,11 @@ export type ErrorCode =
   // 0.7.3 — engine-side flood-control safety floor (fup-2026-190)
   | 'BULK_LIMIT_EXCEEDED'
   // 0.7.10 — confirm contract for destructive tools
-  | 'CONFIRM_REQUIRED';
+  | 'CONFIRM_REQUIRED'
+  // 0.7.10 — maad_backup: git-tag snapshot lifecycle
+  | 'TAG_EXISTS'
+  | 'TAG_NOT_FOUND'
+  | 'NO_HEAD_COMMIT';
 
 export interface MaadError {
   code: ErrorCode;

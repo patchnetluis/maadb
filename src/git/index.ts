@@ -127,4 +127,60 @@ export class GitLayer {
   getSimpleGit(): SimpleGit {
     return this.git;
   }
+
+  // ---- 0.7.10 — tag operations for maad_backup ---------------------------
+
+  async addAnnotatedTag(name: string, message: string): Promise<void> {
+    await this.git.addAnnotatedTag(name, message);
+  }
+
+  /**
+   * List annotated tags whose name starts with the given prefix. Uses
+   * for-each-ref so name + commit sha + tagger date + subject all come back
+   * in one git call. Returns [] when no tags match.
+   *
+   * For annotated tags, `%(*objectname)` is the underlying commit sha.
+   * For lightweight tags, that field is empty — we surface the empty sha
+   * verbatim rather than fall back to the tag object's own sha, since
+   * lightweight tags shouldn't appear under our prefix in practice.
+   */
+  async listTagsByPrefix(prefix: string): Promise<Array<{ tag: string; sha: string; message: string; createdAt: string }>> {
+    const sep = '\x1f'; // ASCII unit separator — safe vs '|' in messages.
+    const format = `%(refname:short)${sep}%(*objectname)${sep}%(taggerdate:iso-strict)${sep}%(contents:subject)`;
+    const raw = await this.git.raw(['for-each-ref', `--format=${format}`, `refs/tags/${prefix}*`]);
+    if (!raw.trim()) return [];
+    return raw.trim().split('\n').map(line => {
+      const parts = line.split(sep);
+      return {
+        tag: parts[0] ?? '',
+        sha: parts[1] ?? '',
+        createdAt: parts[2] ?? '',
+        message: parts[3] ?? '',
+      };
+    });
+  }
+
+  async deleteTag(name: string): Promise<void> {
+    await this.git.tag(['-d', name]);
+  }
+
+  /** Returns the HEAD commit sha, or null if the repo has no commits yet. */
+  async headSha(): Promise<string | null> {
+    try {
+      const out = await this.git.revparse(['HEAD']);
+      return out.trim() || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Returns the short branch name (e.g. "main") or "HEAD" when detached. */
+  async currentBranch(): Promise<string> {
+    try {
+      const out = await this.git.revparse(['--abbrev-ref', 'HEAD']);
+      return out.trim() || 'HEAD';
+    } catch {
+      return 'HEAD';
+    }
+  }
 }

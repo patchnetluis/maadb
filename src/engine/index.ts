@@ -42,6 +42,7 @@ import * as indexing from './indexing.js';
 import * as reads from './reads.js';
 import * as composites from './composites.js';
 import * as writes from './writes.js';
+import * as backup from './backup.js';
 import * as maintenance from './maintenance.js';
 import * as auditOps from './audit.js';
 
@@ -536,6 +537,9 @@ export class MaadEngine {
   async verifyField(id: DocId, field: string, expected: unknown) { return reads.verifyField(this.ctx(), id, field, expected); }
   verifyCount(dt: DocType, expectedCount: number, filters?: Record<string, import('../types.js').FilterCondition>) { return reads.verifyCount(this.ctx(), dt, expectedCount, filters); }
   async verifyIntegrity(query?: import('./types.js').IntegrityQuery) { return reads.verifyIntegrity(this.ctx(), query); }
+  async backupCreate(opts?: import('./types.js').CreateBackupOptions) { return backup.createBackup(this.ctx(), opts); }
+  async backupList(opts?: import('./types.js').ListBackupsOptions) { return backup.listBackups(this.ctx(), opts); }
+  async backupDelete(tag: string) { return backup.deleteBackup(this.ctx(), tag); }
   changesSince(query: import('./types.js').ChangesSinceQuery) { return reads.changesSince(this.ctx(), query); }
 
   // --- Composites (Tier 2, provisional) ---
