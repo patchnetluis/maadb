@@ -175,15 +175,24 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
   }));
 
   server.registerTool('maad_verify', {
-    description: 'Fact-check a claim against the database. Two modes: (1) field — verify a specific field value on a document, (2) count — verify a document count for a type with optional filters. Use this BEFORE stating any number, date, amount, or count as fact.',
+    description: 'Fact-check or audit. Three modes: (1) field — verify a specific field value on a document, (2) count — verify a document count for a type with optional filters, (3) integrity — sweep markdown on disk, compare to the SQLite index, and report five drift categories (missing_in_index, missing_on_disk, hash_drift, schema_drift, broken_refs). Field/count: use BEFORE stating any number, date, amount, or count as fact. Integrity: use after external git pulls, manual edits, or schema-pack version bumps to confirm the project is consistent.',
     inputSchema: z.object({
-      mode: z.enum(['field', 'count']).describe('Verification mode'),
-      docId: z.string().optional().describe('Document ID (required for field mode)'),
+      mode: z.enum(['field', 'count', 'integrity']).describe('Verification mode'),
+      docId: z.string().optional().describe('Document ID (required for field mode, optional scope filter for integrity mode)'),
       field: z.string().optional().describe('Field name to verify (required for field mode)'),
       expected: z.any().optional().describe('Expected value for the field (required for field mode)'),
-      docType: z.string().optional().describe('Document type (required for count mode)'),
+      docType: z.string().optional().describe('Document type (required for count mode, optional scope filter for integrity mode)'),
       expectedCount: z.number().optional().describe('Expected document count (required for count mode)'),
-      filters: z.any().optional().describe('Field filters for count mode (same format as maad_query)'),
+      filters: z.any().optional().describe('Field filters (same format as maad_query). Used by count and integrity modes.'),
+      // 0.7.10 — integrity mode inputs
+      categories: z.array(z.enum([
+        'missing_in_index',
+        'missing_on_disk',
+        'hash_drift',
+        'schema_drift',
+        'broken_refs',
+      ])).optional().describe('Integrity mode: which finding categories to compute. Default: all five.'),
+      verbose: z.boolean().optional().describe('Integrity mode: include per-record details[] in the response. Default false (summary only).'),
       project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
   }, async (args, extra) => withEngine(ctx, extra, 'maad_verify', args, async ({ engine }) => {
@@ -199,7 +208,16 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       }
       return resultToResponse(engine.verifyCount(docType(args.docType), args.expectedCount, args.filters as any), 'maad_verify');
     }
-    return resultToResponse({ ok: false, errors: [{ code: 'INVALID_ARGS', message: 'mode must be "field" or "count"' }] } as any, 'maad_verify');
+    if (args.mode === 'integrity') {
+      const integrityQuery: import('../../engine/types.js').IntegrityQuery = {};
+      if (args.docType !== undefined) integrityQuery.docType = docType(args.docType);
+      if (args.docId !== undefined) integrityQuery.docId = docId(args.docId);
+      if (args.filters !== undefined) integrityQuery.filter = args.filters as Record<string, import('../../types.js').FilterCondition>;
+      if (args.categories !== undefined) integrityQuery.categories = args.categories;
+      if (args.verbose !== undefined) integrityQuery.verbose = args.verbose;
+      return resultToResponse(await engine.verifyIntegrity(integrityQuery), 'maad_verify');
+    }
+    return resultToResponse({ ok: false, errors: [{ code: 'INVALID_ARGS', message: 'mode must be "field", "count", or "integrity"' }] } as any, 'maad_verify');
   }));
 
   server.registerTool('maad_join', {
