@@ -535,6 +535,7 @@ export class MaadEngine {
   join(query: import('./types.js').JoinQuery) { return reads.join(this.ctx(), query); }
   async verifyField(id: DocId, field: string, expected: unknown) { return reads.verifyField(this.ctx(), id, field, expected); }
   verifyCount(dt: DocType, expectedCount: number, filters?: Record<string, import('../types.js').FilterCondition>) { return reads.verifyCount(this.ctx(), dt, expectedCount, filters); }
+  async verifyIntegrity(query?: import('./types.js').IntegrityQuery) { return reads.verifyIntegrity(this.ctx(), query); }
   changesSince(query: import('./types.js').ChangesSinceQuery) { return reads.changesSince(this.ctx(), query); }
 
   // --- Composites (Tier 2, provisional) ---

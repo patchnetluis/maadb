@@ -11,6 +11,7 @@ import type {
   Relationship,
   ValidationResult,
   ValidationWarning,
+  FilterCondition,
 } from '../types.js';
 
 export interface IndexResult {
@@ -294,6 +295,55 @@ export interface VerifyResult {
   expected: unknown;
   actual: unknown;
   source: { docId: string; filePath: string } | 'query';
+}
+
+// ----------------------------------------------------------------------------
+// 0.7.10 — Integrity sweep result types.
+// Walks every markdown file in scope, compares to the SQLite index, and
+// surfaces five categories of drift. Read-only; the sweep never writes to
+// documents, objects, relationships, or engine_meta. See
+// docs/specs/0.7.10-integrity-cleanup.md.
+// ----------------------------------------------------------------------------
+
+export type IntegrityCategory =
+  | 'missing_in_index'
+  | 'missing_on_disk'
+  | 'hash_drift'
+  | 'schema_drift'
+  | 'broken_refs';
+
+export interface IntegrityFindingDetail {
+  docId: string;
+  docType: string;
+  finding: IntegrityCategory;
+  /** hash_drift: indexed hash. schema_drift: current pack schemaRef. */
+  expected?: string;
+  /** hash_drift: on-disk hash. schema_drift: stored schemaRef.
+   *  broken_refs: { fieldName: [unresolved docIds] }. */
+  actual?: string | Record<string, string[]>;
+}
+
+export interface IntegrityResult {
+  scanned: number;
+  healthy: number;
+  findings: Record<IntegrityCategory, number>;
+  scopeFilters: {
+    docType: string | null;
+    docId: string | null;
+    filter: Record<string, FilterCondition> | null;
+    categories: IntegrityCategory[] | null;
+  };
+  completedAt: string;
+  durationMs: number;
+  details?: IntegrityFindingDetail[];
+}
+
+export interface IntegrityQuery {
+  docType?: DocType;
+  docId?: DocId;
+  filter?: Record<string, FilterCondition>;
+  categories?: IntegrityCategory[];
+  verbose?: boolean;
 }
 
 export interface SchemaInfoResult {

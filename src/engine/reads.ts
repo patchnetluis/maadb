@@ -4,7 +4,9 @@
 // ============================================================================
 
 import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 
 import { ok, singleErr, type Result } from '../errors.js';
 import { validateFrontmatter } from '../schema/index.js';
@@ -12,6 +14,7 @@ import { logger } from './logger.js';
 import {
   docId as toDocId,
   docType as toDocType,
+  filePath as toFilePath,
   type DocId,
   type DocType,
   type SchemaDefinition,
@@ -30,6 +33,10 @@ import type {
   SummaryResult,
   SchemaInfoResult,
   VerifyResult,
+  IntegrityCategory,
+  IntegrityFindingDetail,
+  IntegrityQuery,
+  IntegrityResult,
   AggregateQuery,
   AggregateResult,
   JoinQuery,
@@ -39,7 +46,7 @@ import type {
   ChangesPage,
   ChangesSinceParsedCursor,
 } from './types.js';
-import { readFrontmatter, readFrontmatterSync, readBlockContent } from './helpers.js';
+import { readFrontmatter, readFrontmatterSync, readBlockContent, collectMarkdownFiles } from './helpers.js';
 
 export async function getDocument(
   ctx: EngineContext,
@@ -733,6 +740,209 @@ export function verifyCount(
     actual,
     source: 'query',
   });
+}
+
+// ---- Verify mode: integrity (0.7.10) ---------------------------------------
+// Walks markdown on disk, compares to the SQLite index, and reports five
+// drift categories. Pure read — never writes to documents/objects/refs nor
+// engine_meta. Reuses fileHash (sha256) from src/parser/index.ts and
+// collectMarkdownFiles from helpers; no new walker, no new index column.
+
+const ALL_INTEGRITY_CATEGORIES: IntegrityCategory[] = [
+  'missing_in_index',
+  'missing_on_disk',
+  'hash_drift',
+  'schema_drift',
+  'broken_refs',
+];
+
+export async function verifyIntegrity(
+  ctx: EngineContext,
+  query: IntegrityQuery = {},
+): Promise<Result<IntegrityResult>> {
+  const startMs = Date.now();
+  const verbose = query.verbose ?? false;
+  const enabled = new Set<IntegrityCategory>(query.categories ?? ALL_INTEGRITY_CATEGORIES);
+
+  // Optional filter narrows the verified set to docIds matching the query
+  // (only records already indexed can match — missing_in_index for filtered
+  // scopes is undefined and not reported when filter is in play).
+  let allowedDocIds: Set<string> | null = null;
+  if (query.filter) {
+    const findQuery: DocumentQuery = { filters: query.filter };
+    if (query.docType) findQuery.docType = query.docType;
+    const found = ctx.backend.findDocuments(findQuery);
+    allowedDocIds = new Set(found.map(r => r.docId as string));
+  }
+
+  const findings: Record<IntegrityCategory, number> = {
+    missing_in_index: 0,
+    missing_on_disk: 0,
+    hash_drift: 0,
+    schema_drift: 0,
+    broken_refs: 0,
+  };
+  const details: IntegrityFindingDetail[] = [];
+  const unhealthyOnDisk = new Set<string>();
+  const filesOnDisk = new Set<string>();
+  let scanned = 0;
+
+  for (const [typeName, regType] of ctx.registry.types) {
+    if (query.docType && (typeName as string) !== (query.docType as string)) continue;
+
+    const dirPath = path.join(ctx.projectRoot, regType.path);
+    if (!existsSync(dirPath)) continue;
+
+    const files = await collectMarkdownFiles(dirPath);
+    for (const file of files) {
+      const relPath = path.relative(ctx.projectRoot, file).replace(/\\/g, '/');
+      filesOnDisk.add(relPath);
+      scanned++;
+
+      const row = ctx.backend.getDocumentByPath(toFilePath(relPath));
+      if (!row) {
+        // filter scope is index-only — skip missing_in_index when filter active
+        if (enabled.has('missing_in_index') && allowedDocIds === null) {
+          findings.missing_in_index++;
+          unhealthyOnDisk.add(relPath);
+          if (verbose) {
+            details.push({
+              docId: path.basename(file, '.md'),
+              docType: typeName as string,
+              finding: 'missing_in_index',
+            });
+          }
+        }
+        continue;
+      }
+
+      if (query.docId && (row.docId as string) !== (query.docId as string)) continue;
+      if (allowedDocIds && !allowedDocIds.has(row.docId as string)) continue;
+
+      let recordHasFinding = false;
+
+      if (enabled.has('hash_drift')) {
+        const raw = await readFile(file, 'utf-8');
+        const diskHash = createHash('sha256').update(raw).digest('hex');
+        if (diskHash !== row.fileHash) {
+          findings.hash_drift++;
+          recordHasFinding = true;
+          if (verbose) {
+            details.push({
+              docId: row.docId as string,
+              docType: row.docType as string,
+              finding: 'hash_drift',
+              expected: `sha256:${row.fileHash}`,
+              actual: `sha256:${diskHash}`,
+            });
+          }
+        }
+      }
+
+      if (enabled.has('schema_drift')) {
+        const regForType = ctx.registry.types.get(row.docType);
+        if (regForType && (row.schemaRef as string) !== (regForType.schemaRef as string)) {
+          findings.schema_drift++;
+          recordHasFinding = true;
+          if (verbose) {
+            details.push({
+              docId: row.docId as string,
+              docType: row.docType as string,
+              finding: 'schema_drift',
+              expected: regForType.schemaRef as string,
+              actual: row.schemaRef as string,
+            });
+          }
+        }
+      }
+
+      if (enabled.has('broken_refs')) {
+        const schema = ctx.schemaStore.getSchemaForType(row.docType);
+        if (schema) {
+          const fm = await readFrontmatter(ctx.projectRoot, row);
+          const broken: Record<string, string[]> = {};
+          for (const [fieldName, fieldDef] of schema.fields) {
+            const isScalarRef = fieldDef.type === 'ref';
+            const isListOfRef = fieldDef.type === 'list' && (fieldDef as { itemType?: string }).itemType === 'ref';
+            if (!isScalarRef && !isListOfRef) continue;
+
+            const value = fm[fieldName];
+            if (value === undefined || value === null) continue;
+
+            const candidates: string[] = [];
+            if (isScalarRef && typeof value === 'string') {
+              candidates.push(value);
+            } else if (isListOfRef && Array.isArray(value)) {
+              for (const v of value) {
+                if (typeof v === 'string') candidates.push(v);
+              }
+            }
+
+            for (const candidate of candidates) {
+              const target = ctx.backend.getDocument(toDocId(candidate));
+              if (!target) {
+                (broken[fieldName] ??= []).push(candidate);
+              }
+            }
+          }
+          if (Object.keys(broken).length > 0) {
+            findings.broken_refs++;
+            recordHasFinding = true;
+            if (verbose) {
+              details.push({
+                docId: row.docId as string,
+                docType: row.docType as string,
+                finding: 'broken_refs',
+                actual: broken,
+              });
+            }
+          }
+        }
+      }
+
+      if (recordHasFinding) unhealthyOnDisk.add(relPath);
+    }
+  }
+
+  if (enabled.has('missing_on_disk')) {
+    const allStored = ctx.backend.getAllFileHashes();
+    for (const [storedPath] of allStored) {
+      const normalized = (storedPath as string).replace(/\\/g, '/');
+      if (filesOnDisk.has(normalized)) continue;
+      const doc = ctx.backend.getDocumentByPath(storedPath);
+      if (!doc) continue;
+      if (query.docType && (doc.docType as string) !== (query.docType as string)) continue;
+      if (query.docId && (doc.docId as string) !== (query.docId as string)) continue;
+      if (allowedDocIds && !allowedDocIds.has(doc.docId as string)) continue;
+      findings.missing_on_disk++;
+      if (verbose) {
+        details.push({
+          docId: doc.docId as string,
+          docType: doc.docType as string,
+          finding: 'missing_on_disk',
+        });
+      }
+    }
+  }
+
+  const healthy = scanned - unhealthyOnDisk.size;
+
+  const result: IntegrityResult = {
+    scanned,
+    healthy,
+    findings,
+    scopeFilters: {
+      docType: query.docType ? (query.docType as string) : null,
+      docId: query.docId ? (query.docId as string) : null,
+      filter: query.filter ?? null,
+      categories: query.categories ?? null,
+    },
+    completedAt: new Date().toISOString(),
+    durationMs: Date.now() - startMs,
+  };
+  if (verbose) result.details = details;
+
+  return ok(result);
 }
 
 // ============================================================================
