@@ -74,7 +74,9 @@ export type ErrorCode =
   | 'FILTER_EMPTY_ARRAY'
   | 'FILTER_OP_INVALID'
   // 0.7.3 — engine-side flood-control safety floor (fup-2026-190)
-  | 'BULK_LIMIT_EXCEEDED';
+  | 'BULK_LIMIT_EXCEEDED'
+  // 0.7.10 — confirm contract for destructive tools
+  | 'CONFIRM_REQUIRED';
 
 export interface MaadError {
   code: ErrorCode;
