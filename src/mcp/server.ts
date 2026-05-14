@@ -36,6 +36,7 @@ import * as readTools from './tools/read.js';
 import * as writeTools from './tools/write.js';
 import * as auditTools from './tools/audit.js';
 import * as maintainTools from './tools/maintain.js';
+import * as backupTools from './tools/backup.js';
 import * as instanceTools from './tools/instance.js';
 import * as authTools from './tools/auth.js';
 
@@ -168,6 +169,7 @@ export async function startServer(opts: ServeOptions): Promise<void> {
     }
     if (legacyRole === 'admin') {
       toolCount += maintainTools.register(server, ctx);
+      toolCount += backupTools.register(server, ctx);
       // maad_instance_reload always registers for admin, even on synthetic
       // instances — handler rejects synthetic with INSTANCE_RELOAD_SYNTHETIC
       // rather than an opaque "unknown tool" response.
