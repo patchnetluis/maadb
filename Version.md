@@ -1,9 +1,18 @@
 ---
 enabled: true
-current: 0.7.10-rc.2
+current: 0.7.10-rc.3
 ---
 
 # Version History
+
+## 0.7.10-rc.3 — 2026-05-17
+Republish of rc.2 — test fixture identity for direct simple-git calls.
+
+rc.2 publish was blocked by two remaining backup-test failures on the CI runner. Two tests in `tests/mcp/backup.test.ts` simulate a "user-created" tag by calling `simpleGit(TEMP_ROOT).addAnnotatedTag(...)` directly without going through `GitLayer` — the engine fix in rc.2 didn't touch that path. The test's `beforeEach` was already chaining `.env()` for the init commit but not setting repo-local `user.email` / `user.name`, so any direct simple-git operation later in a test body had no identity to anchor on. Added `setupGit.addConfig('user.email', ...)` + `addConfig('user.name', ...)` to the fixture init so repo-local config persists for all subsequent operations.
+
+Test-only change. 873 tests passing under simulated-CI git config. No engine or surface change. No new dependencies.
+
+Scope otherwise identical to rc.1 below.
 
 ## 0.7.10-rc.2 — 2026-05-17
 Republish of rc.1 — fixes a CI test-suite failure in the new `maad_backup` tool.

@@ -27,13 +27,14 @@ beforeEach(async () => {
   // a repo + initial commit so backup operations have a HEAD to anchor against.
   const setupGit = simpleGit(TEMP_ROOT);
   await setupGit.init();
-  await setupGit
-    .env('GIT_AUTHOR_NAME', 'test')
-    .env('GIT_AUTHOR_EMAIL', 'test@example.com')
-    .env('GIT_COMMITTER_NAME', 'test')
-    .env('GIT_COMMITTER_EMAIL', 'test@example.com')
-    .add('.')
-    .commit('test fixture init');
+  // Set repo-local identity so any direct simpleGit operations later in the
+  // test body (e.g. tests that plant a "user-created" tag via
+  // git.addAnnotatedTag without going through GitLayer) inherit it. Without
+  // this, those direct calls fail on bare CI runners that have no global
+  // git config.
+  await setupGit.addConfig('user.email', 'test@example.com');
+  await setupGit.addConfig('user.name', 'test');
+  await setupGit.add('.').commit('test fixture init');
 
   engine = new MaadEngine();
   const result = await engine.init(TEMP_ROOT);

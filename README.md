@@ -5,7 +5,7 @@
 [![TypeScript](https://img.shields.io/badge/typescript-strict-blue.svg)](tsconfig.json)
 [![Tests](https://img.shields.io/badge/tests-873%20passing-brightgreen.svg)](tests)
 [![npm](https://img.shields.io/npm/v/@maadb/core.svg)](https://www.npmjs.com/package/@maadb/core)
-[![Version](https://img.shields.io/badge/version-0.7.10--rc.2-purple.svg)](Version.md)
+[![Version](https://img.shields.io/badge/version-0.7.10--rc.3-purple.svg)](Version.md)
 
 > **Markdown is the database. The engine makes it queryable.**
 
