@@ -16,6 +16,7 @@ import { setGuardrailConfig } from './guardrails.js';
 import { setProvenanceMode } from './response.js';
 import { initIdempotencyCache, readIdempotencyEnv } from './idempotency.js';
 import { initRateLimiter, readRateLimitEnv } from './rate-limit.js';
+import { initMemoryPressureWatcher, readMemoryPressureEnv, stopMemoryPressureWatcher } from './memory-pressure.js';
 import { initLogging, readLoggingEnv, logOpsChannelReady } from '../logging.js';
 import { installSignalHandlers } from './shutdown.js';
 import { installReloadSignalHandler } from './reload-signal.js';
@@ -112,6 +113,11 @@ export async function startServer(opts: ServeOptions): Promise<void> {
   });
   initIdempotencyCache(readIdempotencyEnv());
   initRateLimiter(readRateLimitEnv());
+  // 0.7.10 P5 — V8 heap-pressure sampler. Defaults: 60s interval, 0.8 ratio
+  // threshold, 5min fire cooldown. Set MAAD_MEMORY_PRESSURE_INTERVAL_MS=0 to
+  // disable. Emits degraded-severity ops events when V8 heap approaches the
+  // cgroup-driven heap cap so OOMs are visible pre-crash.
+  initMemoryPressureWatcher(readMemoryPressureEnv());
 
   // 0.7.0 — Load the token registry (HTTP+file mode) or null-out for stdio/synthetic.
   // Boot-mode enforcement happens in the HTTP branch below; in stdio/synthetic
@@ -257,6 +263,7 @@ export async function startServer(opts: ServeOptions): Promise<void> {
       { pool, rateLimiter: getRateLimiter() },
       {
         finalCleanup: async () => {
+          stopMemoryPressureWatcher();
           try { await handle.close(); } catch { /* best-effort */ }
         },
       },
@@ -289,6 +296,7 @@ export async function startServer(opts: ServeOptions): Promise<void> {
     { pool, rateLimiter: getRateLimiter() },
     {
       finalCleanup: async () => {
+        stopMemoryPressureWatcher();
         try { await server.close(); } catch { /* best-effort */ }
       },
     },

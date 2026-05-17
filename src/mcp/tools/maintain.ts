@@ -12,6 +12,7 @@ import { isDryRun, dryRunResponse, auditToolCall } from '../guardrails.js';
 import type { InstanceCtx } from '../ctx.js';
 import { withEngine } from '../with-session.js';
 import { getTransportSnapshot, isInitialized as telemetryInitialized } from '../transport/telemetry.js';
+import { getMemoryPressureSnapshot } from '../memory-pressure.js';
 
 export function register(server: McpServer, ctx: InstanceCtx): number {
   server.registerTool('maad_delete', {
@@ -61,7 +62,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
   }));
 
   server.registerTool('maad_health', {
-    description: 'Engine health + transport + session telemetry + instance reload stats. sessions block: {active, pinned, subscribed, byProject: {<project>:{<role>:count}}, byIdentity: {<agent_id|anonymous>:count}, ...lifecycle counters}. instance block: {source, configPath?, projectCount, reload counters}.',
+    description: 'Engine health + transport + session telemetry + instance reload stats. sessions block: {active, pinned, subscribed, byProject: {<project>:{<role>:count}}, byIdentity: {<agent_id|anonymous>:count}, ...lifecycle counters}. instance block: {source, configPath?, projectCount, reload counters}. runtime block: {memoryPressure: {enabled, intervalMs, thresholdRatio, lastSampleAt, heapUsedMb, heapCapMb, ratio, inPressure, lastPressureAt, pressureFiresTotal}}.',
     inputSchema: z.object({
       project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
@@ -118,9 +119,13 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
     const sessionsBlock = telemetry
       ? { ...telemetry.sessions, subscribed: subscribedCount, byProject, byIdentity }
       : { subscribed: subscribedCount, byProject, byIdentity };
+    // 0.7.10 P5 — runtime block surfaces process-level memory-pressure state so
+    // operators can read V8 heap pressure without grepping logs. Snapshot is
+    // always present; `enabled: false` indicates the sampler is disabled.
+    const runtime = { memoryPressure: getMemoryPressureSnapshot() };
     const payload = telemetry
-      ? { ...health, provenance: provMode, transport: telemetry.transport, sessions: sessionsBlock, instance: instanceBlock }
-      : { ...health, provenance: provMode, sessions: sessionsBlock, instance: instanceBlock };
+      ? { ...health, provenance: provMode, transport: telemetry.transport, sessions: sessionsBlock, instance: instanceBlock, runtime }
+      : { ...health, provenance: provMode, sessions: sessionsBlock, instance: instanceBlock, runtime };
     return successResponse(payload, 'maad_health');
   }));
 
