@@ -795,11 +795,18 @@ export async function verifyIntegrity(
 
     const files = await collectMarkdownFiles(dirPath);
     for (const file of files) {
-      const relPath = path.relative(ctx.projectRoot, file).replace(/\\/g, '/');
+      // Two forms of the relative path: native (matches what indexing stored
+      // in documents.file_path — backslash on Windows) for the DB lookup, and
+      // forward-slash-normalized for the filesOnDisk set later compared
+      // against getAllFileHashes values that are normalized the same way.
+      // Without this split the lookup always misses on Windows and every
+      // record gets miscounted as missing_in_index.
+      const relPathNative = path.relative(ctx.projectRoot, file);
+      const relPath = relPathNative.replace(/\\/g, '/');
       filesOnDisk.add(relPath);
       scanned++;
 
-      const row = ctx.backend.getDocumentByPath(toFilePath(relPath));
+      const row = ctx.backend.getDocumentByPath(toFilePath(relPathNative));
       if (!row) {
         // filter scope is index-only — skip missing_in_index when filter active
         if (enabled.has('missing_in_index') && allowedDocIds === null) {
