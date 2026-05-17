@@ -1,9 +1,34 @@
 ---
 enabled: true
-current: 0.7.9
+current: 0.7.10-rc.1
 ---
 
 # Version History
+
+## 0.7.10-rc.1 — 2026-05-17
+Integrity audit + snapshot backups + V8 memory-pressure observability.
+
+Release candidate for the 0.7.10 line. Ships the read-side audit tooling, snapshot backups, and a pre-OOM observability surface — the destructive cleanup primitives (`maad_bulk_delete`, `maad_delete_where`, `maad_repair_where`, `maad_purge_soft_deleted`) and the corresponding `maad_health.lastIntegritySweepAt` / `lastIntegrityFindings` / `lastBackupTag` additions from the original Integrity & Cleanup scope defer to a follow-on rc / final 0.7.10. Published to npm dist-tag `next`; stable users continue to receive 0.7.9 on `latest`.
+
+**Confirm-contract foundation (P1).** Cross-cutting safety contract that every destructive tool in the 0.7.10 line will adopt. New `CONFIRM_REQUIRED` error code in `src/errors.ts`. New `requireConfirm()` helper alongside the existing `isDryRun()` pattern. Audit-log payload gains `confirm_mode: 'dry_run' | 'confirmed'` so post-hoc analysis distinguishes exploration from action. No destructive tools yet wired to the contract — those land in the follow-on rc.
+
+**Integrity sweep (P2) — `maad_verify mode: 'integrity'`.** Read-only walker that compares markdown on disk to the SQLite index across five drift categories: `missing_in_index` (file present on disk, no index row), `missing_on_disk` (index row, no file), `hash_drift` (file changed externally — sha256 mismatch), `schema_drift` (record's `schemaRef` behind the currently-loaded schema-pack), `broken_refs` (frontmatter ref field points to a non-existent docId). Reuses the existing `collectMarkdownFiles` walker, `fileHash` sha256 algorithm, and `getDocumentByPath` lookup — no new index column, no new walker, no second source of truth. Scope filters (`docType`, `docId`, `filter`, `categories`) constrain the sweep; `verbose: true` returns per-record `details[]` with the exact mismatch values. Performance budget < 5s for a 10k-record project.
+
+**Find-orphans wrapper (P3) — `maad_find_orphans`.** Thin convenience wrapper over `maad_verify({ mode: 'integrity', categories: ['broken_refs'], verbose: true })`. Two surfaces, one implementation. Tests verify parity with the underlying integrity-mode call.
+
+**Snapshot backups (P4) — `maad_backup`.** Admin-tier tool that creates annotated git tags on the project repo HEAD. Three modes: `create` (default — generates `maad-snapshot-YYYY-MM-DD-HHMM[-<label>]` UTC tag name, label sanitized to `[a-z0-9-]+` capped at 32 chars), `list` (returns existing snapshot tags with `{ tag, sha, message, createdAt }`), and `delete` (removes a single snapshot tag). Backed by new `GitLayer` methods (`addTag` / `listTagsByPrefix` / `deleteTag` / `headSha` / `currentBranch`) and a new `src/engine/backup.ts`. Three new error codes: `TAG_EXISTS`, `TAG_NOT_FOUND`, `NO_HEAD_COMMIT`. No destructive defense-in-depth required — tag creation/deletion just manipulates refs, no working-tree mutation.
+
+**V8 memory-pressure watcher (P5).** Periodic V8 heap-pressure sampler in `src/mcp/memory-pressure.ts` emits a degraded-severity `engine.memory_pressure` ops event when `process.memoryUsage()` heap_used vs `v8.getHeapStatistics()` heap_size_limit crosses a configurable threshold (default 0.8). State surfaces on the new `maad_health.runtime.memoryPressure` block (`{ enabled, intervalMs, thresholdRatio, lastSampleAt, heapUsedMb, heapCapMb, ratio, inPressure, lastPressureAt, pressureFiresTotal }`). Edge-triggered with cooldown — fires once when the ratio first crosses threshold, suppresses while pressure is sustained until the cooldown window elapses, then re-fires with `edge: false`. First sample below threshold re-arms the edge trigger. Under cgroup-capped deployments on Node 24, V8 trips its auto-calibrated heap cap (~253 MB old-space on a 512 MiB cgroup) without an engine-side warning surface before SIGABRT; the watcher gives operators a pre-OOM signal that's visible before the crash. New env vars `MAAD_MEMORY_PRESSURE_INTERVAL_MS` (default 60000, set 0 to disable), `MAAD_MEMORY_PRESSURE_RATIO` (default 0.8, clamped to [0,1]), `MAAD_MEMORY_PRESSURE_COOLDOWN_MS` (default 300000). Sampler is injectable for testing.
+
+**Bug fixes.** Parser now tolerates CRLF line endings in heading detection (Windows checkouts via `core.autocrlf=true` no longer break block-pointer math). SIGHUP instance-reload handler no longer crashes when `ctx.tokens` is undefined on synthetic instances. `verifyIntegrity` Windows path-separator mismatch corrected — `documents.file_path` stores native-separator paths (backslash on Windows) and the reader now queries with the matching form rather than the forward-slash-normalized form, fixing a Windows-only bug where every record miscounted as `missing_in_index`.
+
+**Test infrastructure.** `tests/engine/pipeline.test.ts` now copies `simple-crm` to a temp root in `beforeAll` instead of writing into the shared fixture's `_backend` during `indexAll`. Eliminates the parallel-race class with sibling tests that `cpSync` the same fixture — the shared `simple-crm/_backend` is now truly read-only across the suite.
+
+**Publish workflow.** `.github/workflows/publish.yml` now auto-detects pre-release versions (any with a hyphen, e.g. `0.7.10-rc.1`) and routes to npm dist-tag `next` instead of `latest`, so pre-release publishes don't shadow the stable release on `npm install @maadb/core`.
+
+869 tests passing (+52 over 0.7.9 baseline of 817 — 14 new memory-pressure, plus integrity / find-orphans / backup / confirm-contract tests landed across P1–P4, plus a pre-existing parser fix landed). New error codes: `CONFIRM_REQUIRED`, `TAG_EXISTS`, `TAG_NOT_FOUND`, `NO_HEAD_COMMIT`. New env vars: `MAAD_MEMORY_PRESSURE_INTERVAL_MS`, `MAAD_MEMORY_PRESSURE_RATIO`, `MAAD_MEMORY_PRESSURE_COOLDOWN_MS`. No new dependencies. No breaking changes — every addition is opt-in or additive.
+
+Deferred to follow-on rc / final 0.7.10 release: `maad_bulk_delete`, `maad_delete_where`, `maad_repair_where`, `maad_purge_soft_deleted` (steps 5–8 in the original spec) and the three `maad_health` fields backed by `engine_meta` (step 9).
 
 ## 0.7.9 — 2026-05-05
 First npm publish via Trusted Publishers (OIDC).

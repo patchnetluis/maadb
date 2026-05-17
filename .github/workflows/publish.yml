@@ -45,8 +45,24 @@ jobs:
           fi
           echo "Tag $GITHUB_REF_NAME matches package.json version $PKG_VERSION"
 
+      - name: Determine npm dist-tag
+        id: dist-tag
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [[ "$PKG_VERSION" == *-* ]]; then
+            # Any version with a hyphen is a pre-release (e.g. 0.7.10-rc.1,
+            # 0.8.0-alpha.2). Route to the `next` dist-tag so `npm install
+            # @maadb/core` continues to pick up the latest stable release
+            # rather than the pre-release.
+            echo "tag=next" >> "$GITHUB_OUTPUT"
+            echo "Pre-release version $PKG_VERSION → publishing to dist-tag 'next'"
+          else
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+            echo "Stable version $PKG_VERSION → publishing to dist-tag 'latest'"
+          fi
+
       - name: Publish to npm
-        run: npm publish --provenance
+        run: npm publish --provenance --tag "${{ steps.dist-tag.outputs.tag }}"
         # No NODE_AUTH_TOKEN — Trusted Publishers (OIDC) handles auth via id-token: write.
         # If Trusted Publisher is not yet configured for this package on npm, this step
         # will fail with an auth error. Configure at:
