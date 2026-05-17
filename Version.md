@@ -1,9 +1,18 @@
 ---
 enabled: true
-current: 0.7.10-rc.1
+current: 0.7.10-rc.2
 ---
 
 # Version History
+
+## 0.7.10-rc.2 — 2026-05-17
+Republish of rc.1 — fixes a CI test-suite failure in the new `maad_backup` tool.
+
+rc.1 publish was blocked because `GitLayer.addAnnotatedTag` (new in 0.7.10 P4) didn't inject the `GIT_COMMITTER_NAME` / `GIT_COMMITTER_EMAIL` env per call, so the test suite failed on the GitHub Actions runner with `fatal: unable to auto-detect email address`. Same per-call identity-injection pattern that `autoCommit` and `initRepo` adopted in 0.7.3 (fup-2026-095) now extends to the annotated-tag operation: `resolveCommitAuthor()` is read on each call and chained through simple-git's `.env()` before `addAnnotatedTag`. The bug was masked on any dev machine with a global `git config user.email` set; the GitHub-hosted runner has none, so the failure surfaced there first.
+
+No new tests — the 15 existing backup tests in `tests/mcp/backup.test.ts` now pass on bare CI runners and continue to pass locally. 873 tests passing in total. No new dependencies. No breaking changes. No surface change beyond the bug fix.
+
+Scope otherwise identical to rc.1 below.
 
 ## 0.7.10-rc.1 — 2026-05-17
 Integrity audit + snapshot backups + V8 memory-pressure observability.

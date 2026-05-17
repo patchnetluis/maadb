@@ -131,7 +131,19 @@ export class GitLayer {
   // ---- 0.7.10 — tag operations for maad_backup ---------------------------
 
   async addAnnotatedTag(name: string, message: string): Promise<void> {
-    await this.git.addAnnotatedTag(name, message);
+    // Inject the committer identity env per-call — annotated tags need a
+    // tagger identity and we can't depend on the host having `git config
+    // user.name/user.email` set. Same pattern as autoCommit + initRepo
+    // (0.7.3 fup-2026-095). Without this the call fails on bare CI runners
+    // and any other host without global git config — masked locally on any
+    // dev machine that does have it set.
+    const identity = resolveCommitAuthor();
+    await this.git
+      .env('GIT_AUTHOR_NAME', identity.GIT_AUTHOR_NAME)
+      .env('GIT_AUTHOR_EMAIL', identity.GIT_AUTHOR_EMAIL)
+      .env('GIT_COMMITTER_NAME', identity.GIT_COMMITTER_NAME)
+      .env('GIT_COMMITTER_EMAIL', identity.GIT_COMMITTER_EMAIL)
+      .addAnnotatedTag(name, message);
   }
 
   /**

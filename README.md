@@ -3,9 +3,9 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%E2%89%A524-brightgreen.svg)](package.json)
 [![TypeScript](https://img.shields.io/badge/typescript-strict-blue.svg)](tsconfig.json)
-[![Tests](https://img.shields.io/badge/tests-869%20passing-brightgreen.svg)](tests)
+[![Tests](https://img.shields.io/badge/tests-873%20passing-brightgreen.svg)](tests)
 [![npm](https://img.shields.io/npm/v/@maadb/core.svg)](https://www.npmjs.com/package/@maadb/core)
-[![Version](https://img.shields.io/badge/version-0.7.10--rc.1-purple.svg)](Version.md)
+[![Version](https://img.shields.io/badge/version-0.7.10--rc.2-purple.svg)](Version.md)
 
 > **Markdown is the database. The engine makes it queryable.**
 
