@@ -1,19 +1,27 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import path from 'node:path';
+import { existsSync, rmSync, cpSync } from 'node:fs';
 import { MaadEngine } from '../../src/engine.js';
 import { docId, docType } from '../../src/types.js';
 
-const FIXTURE_ROOT = path.resolve(__dirname, '../fixtures/simple-crm');
+const FIXTURE_SRC = path.resolve(__dirname, '../fixtures/simple-crm');
+const TEMP_ROOT = path.resolve(__dirname, '../fixtures/.tmp-simple-crm-pipeline');
 let engine: MaadEngine;
 
 beforeAll(async () => {
+  if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true });
+  // Copy fixture to a temp root so this test never writes into the shared
+  // tests/fixtures/simple-crm/_backend SQLite db. Other tests that cpSync
+  // simple-crm now treat it as truly read-only.
+  cpSync(FIXTURE_SRC, TEMP_ROOT, { recursive: true });
   engine = new MaadEngine();
-  const result = await engine.init(FIXTURE_ROOT);
+  const result = await engine.init(TEMP_ROOT);
   expect(result.ok).toBe(true);
 });
 
 afterAll(() => {
   engine.close();
+  if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true });
 });
 
 describe('indexAll', () => {
