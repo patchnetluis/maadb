@@ -69,6 +69,14 @@ export interface MaadBackend {
   getStats(): BackendStats;
   countBrokenRefs(): number;
 
+  /**
+   * 0.7.10 P5b — return broken-ref rows for the integrity sweep.
+   * One row per (source, target, field) where target is missing or
+   * soft-deleted. Drives the verifyIntegrity broken_refs category without
+   * re-parsing per-doc frontmatter from disk.
+   */
+  getBrokenRefs(): Array<{ sourceDocId: string; sourceDocType: string; field: string; targetDocId: string }>;
+
   // Engine meta key/value (0.7.4 — schema-index fingerprints, future expansion)
   getMeta(key: string): string | null;
   setMeta(key: string, value: string): void;

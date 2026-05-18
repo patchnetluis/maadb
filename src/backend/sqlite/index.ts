@@ -593,6 +593,23 @@ export class SqliteBackend implements MaadBackend {
     `).get() as { cnt: number };
     return row.cnt;
   }
+
+  getBrokenRefs(): Array<{ sourceDocId: string; sourceDocType: string; field: string; targetDocId: string }> {
+    const rows = this.db.prepare(`
+      SELECT r.source_doc_id AS sourceDocId,
+             d.doc_type      AS sourceDocType,
+             r.field         AS field,
+             r.target_doc_id AS targetDocId
+      FROM relationships r
+      JOIN documents d
+        ON r.source_doc_id = d.doc_id
+       AND d.deleted = 0
+      WHERE r.relation_type = 'ref'
+        AND r.target_doc_id NOT IN (SELECT doc_id FROM documents WHERE deleted = 0)
+      ORDER BY r.source_doc_id, r.field, r.target_doc_id
+    `).all() as Array<{ sourceDocId: string; sourceDocType: string; field: string; targetDocId: string }>;
+    return rows;
+  }
 }
 
 // --- Helpers ---------------------------------------------------------------

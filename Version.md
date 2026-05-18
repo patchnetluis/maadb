@@ -1,9 +1,20 @@
 ---
 enabled: true
-current: 0.7.10-rc.3
+current: 0.7.10-rc.4
 ---
 
 # Version History
+
+## 0.7.10-rc.4 — 2026-05-18
+Index-driven broken_refs check — collapses the per-call working-set floor.
+
+Multi-cycle heap-snapshot diagnostic on a busy deployment of rc.3 found that `verifyIntegrity` (and by extension `maad_find_orphans`) was re-parsing every doc's frontmatter from disk to surface broken refs, materializing ~7 property arrays per doc and retaining ~80 MB of working set on a 2200-doc project. Trajectory across three integrity-walk cycles was not a JIT-amortization curve — cycle 2 ballooned to 7.7× cycle 1, signaling per-call materialization survival across function boundaries.
+
+The relationships table already carries every ref discovered at index time, and the `documents` table is the authoritative source for "does the target exist." A new `BackendAdapter.getBrokenRefs()` collapses the entire broken_refs sweep to one SQL roundtrip (joining `relationships` to `documents` to filter to refs whose target is missing or soft-deleted) and `verifyIntegrity` no longer touches disk for this category. Per-call frontmatter parses drop from N (one per doc) to zero. Drift between disk and the index — the only case the old approach would catch that the new one wouldn't — is exactly what the `hash_drift` and `missing_in_index` categories already cover; `broken_refs` is not the right surface for that detection.
+
+Semantically equivalent under a healthy index; existing 17 verify-integrity + find-orphans tests pass without modification. 873 tests passing in total. No new dependencies. No public surface change. The new method is a backend-adapter contract addition.
+
+Operators on deployed rc.3 can either upgrade to rc.4 and watch the working-set floor drop on the next integrity sweep, or stay on rc.3 — the memory-pressure watcher already in place will fire if real production load approaches the heap cap.
 
 ## 0.7.10-rc.3 — 2026-05-17
 Republish of rc.2 — test fixture identity for direct simple-git calls.

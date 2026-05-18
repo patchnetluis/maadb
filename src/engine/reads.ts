@@ -783,6 +783,10 @@ export async function verifyIntegrity(
     broken_refs: 0,
   };
   const details: IntegrityFindingDetail[] = [];
+  // Keyed by docId for indexed docs, by basename(file, '.md') for
+  // missing_in_index files (which have no row, so no docId). Mixed key space
+  // is fine — Set semantics dedupe within each branch; missing_in_index files
+  // by definition can't appear in any other branch.
   const unhealthyOnDisk = new Set<string>();
   const filesOnDisk = new Set<string>();
   let scanned = 0;
@@ -810,11 +814,12 @@ export async function verifyIntegrity(
       if (!row) {
         // filter scope is index-only — skip missing_in_index when filter active
         if (enabled.has('missing_in_index') && allowedDocIds === null) {
+          const inferredDocId = path.basename(file, '.md');
           findings.missing_in_index++;
-          unhealthyOnDisk.add(relPath);
+          unhealthyOnDisk.add(inferredDocId);
           if (verbose) {
             details.push({
-              docId: path.basename(file, '.md'),
+              docId: inferredDocId,
               docType: typeName as string,
               finding: 'missing_in_index',
             });
@@ -863,51 +868,46 @@ export async function verifyIntegrity(
         }
       }
 
-      if (enabled.has('broken_refs')) {
-        const schema = ctx.schemaStore.getSchemaForType(row.docType);
-        if (schema) {
-          const fm = await readFrontmatter(ctx.projectRoot, row);
-          const broken: Record<string, string[]> = {};
-          for (const [fieldName, fieldDef] of schema.fields) {
-            const isScalarRef = fieldDef.type === 'ref';
-            const isListOfRef = fieldDef.type === 'list' && (fieldDef as { itemType?: string }).itemType === 'ref';
-            if (!isScalarRef && !isListOfRef) continue;
+      if (recordHasFinding) unhealthyOnDisk.add(row.docId as string);
+    }
+  }
 
-            const value = fm[fieldName];
-            if (value === undefined || value === null) continue;
+  // 0.7.10 P5b — broken_refs is index-driven, not disk-driven. The
+  // relationships table already carries every ref discovered at index time,
+  // and `documents` is the authoritative source for "does target exist".
+  // Earlier versions re-parsed every doc's frontmatter from disk inside the
+  // per-file loop, which materialized ~7 property arrays per doc and held
+  // ~80 MB of retained working set on a 2200-doc brain project. The bulk
+  // query collapses that to a single SQL roundtrip returning only the
+  // broken-ref rows. Index drift between disk and SQLite is a separate
+  // category (hash_drift / missing_in_index) and is not this branch's
+  // concern.
+  if (enabled.has('broken_refs')) {
+    const brokenRefRows = ctx.backend.getBrokenRefs();
+    const bySource = new Map<string, { docType: string; broken: Record<string, string[]> }>();
+    for (const r of brokenRefRows) {
+      if (query.docType && r.sourceDocType !== (query.docType as string)) continue;
+      if (query.docId && r.sourceDocId !== (query.docId as string)) continue;
+      if (allowedDocIds && !allowedDocIds.has(r.sourceDocId)) continue;
 
-            const candidates: string[] = [];
-            if (isScalarRef && typeof value === 'string') {
-              candidates.push(value);
-            } else if (isListOfRef && Array.isArray(value)) {
-              for (const v of value) {
-                if (typeof v === 'string') candidates.push(v);
-              }
-            }
-
-            for (const candidate of candidates) {
-              const target = ctx.backend.getDocument(toDocId(candidate));
-              if (!target) {
-                (broken[fieldName] ??= []).push(candidate);
-              }
-            }
-          }
-          if (Object.keys(broken).length > 0) {
-            findings.broken_refs++;
-            recordHasFinding = true;
-            if (verbose) {
-              details.push({
-                docId: row.docId as string,
-                docType: row.docType as string,
-                finding: 'broken_refs',
-                actual: broken,
-              });
-            }
-          }
-        }
+      let entry = bySource.get(r.sourceDocId);
+      if (!entry) {
+        entry = { docType: r.sourceDocType, broken: {} };
+        bySource.set(r.sourceDocId, entry);
       }
-
-      if (recordHasFinding) unhealthyOnDisk.add(relPath);
+      (entry.broken[r.field] ??= []).push(r.targetDocId);
+    }
+    for (const [sourceDocId, { docType, broken }] of bySource) {
+      findings.broken_refs++;
+      unhealthyOnDisk.add(sourceDocId);
+      if (verbose) {
+        details.push({
+          docId: sourceDocId,
+          docType,
+          finding: 'broken_refs',
+          actual: broken,
+        });
+      }
     }
   }
 
